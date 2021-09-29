@@ -1,0 +1,4 @@
+.vscode/
+.idea/
+catboost_info/
+*results*.txt

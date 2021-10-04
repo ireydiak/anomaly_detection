@@ -32,6 +32,7 @@ class AbstractDataset(Dataset):
             self.X = X[:, :-1]
             self.y = X[:, -1]
 
+        self.anomaly_ratio = (X[:, -1] == anomaly_label).sum() / len(X)
         self.N = len(self.X)
 
     def __len__(self):

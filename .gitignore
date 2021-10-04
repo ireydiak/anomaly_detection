@@ -2,3 +2,4 @@
 .idea/
 catboost_info/
 *results*.txt
+__pycache__

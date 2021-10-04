@@ -1,6 +1,5 @@
-import logging
 import time
-
+from sklearn import metrics
 from torch.utils.data.dataloader import DataLoader
 import torch.optim as optim
 import torch
@@ -9,7 +8,7 @@ import numpy as np
 
 class DeepSVDDTrainer:
 
-    def __init__(self, model, R, c,
+    def __init__(self, model, R=None, c=None,
                  lr: float = 1e-4, n_epochs: int = 100, batch_size: int = 128, n_jobs_dataloader: int = 0,
                  device: str = 'cuda'):
         self.device = device
@@ -21,29 +20,27 @@ class DeepSVDDTrainer:
         self.c = c
         self.R = R
 
-    def train(self, dataset):
-        logger = logging.getLogger()
-        train_ldr, _ = dataset.loaders(batch_size=self.batch_size, num_worker=self.n_jobs_dataloader)
+    def train(self, dataset: DataLoader):
+        self.model.train()
         optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
         # Initialize hypersphere center c (if c not loaded)
         if self.c is None:
-            logger.info('Initializing center c...')
-            self.c = self.init_center_c(train_ldr)
-            logger.info('Center c initialized.')
+            print("Initializing center c...")
+            self.c = self.init_center_c(dataset)
+            print("Center c initialized.")
 
-        logger.info('Started training')
+        print('Started training')
         epoch_loss = 0.0
         epoch_start_time = time.time()
-        for epoch in self.n_epochs:
-            logger.info('')
-            for x_i in train_ldr:
-                inputs, _, _ = x_i
-                inputs = inputs.to(self.device).float()
+        for epoch in range(self.n_epochs):
+            for sample in dataset:
+                X, _ = sample
+                X = X.to(self.device).float()
 
                 # Reset gradient
                 optimizer.zero_grad()
 
-                outputs = self.model(inputs)
+                outputs = self.model(X)
                 dist = torch.sum((outputs - self.c) ** 2, dim=1)
                 loss = torch.mean(dist)
 
@@ -54,15 +51,44 @@ class DeepSVDDTrainer:
                 epoch_loss += loss
 
             epoch_train_time = time.time() - epoch_start_time
-            logger.info(
-                'Epoch {}/{} \tTime: {:.3f}\t Loss: {:.8f}'.format(
+            print(
+                "Epoch {}/{} \tTime: {:.3f}\t Loss: {:.8f}".format(
                     epoch + 1, self.n_epochs, epoch_train_time, epoch_loss
                 )
             )
-        logger.info('Finished training')
+        print("Finished training")
 
-    def test(self, dataset):
-        pass
+    def test(self, dataset: DataLoader, pos_label: int = 1):
+        self.model.eval()
+        idx_label_score = []
+        y_true, scores = [], []
+        res = {"Accuracy": -1, "Precision": -1, "Recall": -1, "F1-Score": -1, "AUC": -1}
+        with torch.no_grad():
+            for row in dataset:
+                X, y = row
+                X = X.to(self.device).float()
+                outputs = self.model(X)
+                dist = torch.sum((outputs - self.c) ** 2, dim=1)
+                score = dist
+                idx_label_score += list(zip(
+                    y.cpu().data.numpy().tolist(),
+                    score.cpu().data.numpy().tolist())
+                )
+                y_true.extend(y.cpu().tolist())
+                scores.extend(score.cpu().tolist())
+
+        thresh = np.percentile(scores, 80)
+        y_pred = (scores >= thresh).astype(int)
+        y_true = np.array(y_true)
+        res["Precision"], res["Recall"], res["F1-Score"], _ = metrics.precision_recall_fscore_support(
+            y_true, y_pred, average='binary', pos_label=pos_label
+        )
+
+        labels, scores = zip(*idx_label_score)
+        labels = np.array(labels)
+        scores = np.array(scores)
+        res["AUC"] = metrics.roc_auc_score(labels, scores)
+        return res
 
     def init_center_c(self, train_loader: DataLoader, eps=0.1):
         """Initialize hypersphere center c as the mean from an initial forward pass on the data.
@@ -72,11 +98,11 @@ class DeepSVDDTrainer:
 
         self.model.eval()
         with torch.no_grad():
-            for x_i in train_loader:
+            for sample in train_loader:
                 # get the inputs of the batch
-                inputs, _, _ = x_i
-                inputs = inputs.to(self.device)
-                outputs = self.model(inputs)
+                X, _ = sample
+                X = X.to(self.device).float()
+                outputs = self.model(X)
                 n_samples += outputs.shape[0]
                 c += torch.sum(outputs, dim=0)
 
@@ -87,6 +113,9 @@ class DeepSVDDTrainer:
         c[(abs(c) < eps) & (c > 0)] = eps
 
         return c
+
+    def get_params(self) -> dict:
+        return {'c': self.c, 'R': self.R, **self.model.get_params()}
 
 
 def get_radius(dist: torch.Tensor, nu: float):

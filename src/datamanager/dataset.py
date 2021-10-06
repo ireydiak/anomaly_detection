@@ -35,3 +35,11 @@ class USBIDSDataset(AbstractDataset):
 
     def npz_key(self):
         return "usbids"
+
+
+class ArrhythmiaDataset(AbstractDataset):
+
+    name = 'Arrhythmia'
+
+    def npz_key(self):
+        return "arrhythmia"

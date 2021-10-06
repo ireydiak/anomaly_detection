@@ -1,4 +1,3 @@
-import time
 from sklearn import metrics
 from torch.utils.data.dataloader import DataLoader
 import torch.optim as optim
@@ -67,11 +66,8 @@ class DeepSVDDTrainer:
             y_true, y_pred, average='binary', pos_label=pos_label
         )
 
-        # labels, scores = zip(*idx_label_score)
-        labels = np.array(y_true)
-        scores = np.array(scores)
-        res["AUROC"] = metrics.roc_auc_score(labels, scores)
-        res["AUPR"] = metrics.average_precision_score(labels, scores)
+        res["AUROC"] = metrics.roc_auc_score(y_true, scores)
+        res["AUPR"] = metrics.average_precision_score(y_true, scores)
         return res
 
     def test(self, dataset: DataLoader) -> (np.array, np.array):

@@ -27,3 +27,6 @@ class BaseModel(nn.Module):
         model = copy.deepcopy(self)
         with gzip.open(filename, 'wb') as f:
             pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def print_name(self):
+        return self.__class__

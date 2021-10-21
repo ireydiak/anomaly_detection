@@ -104,7 +104,10 @@ class DeepSVDDTrainer:
                 outputs = self.model(X)
                 n_samples += outputs.shape[0]
                 c += torch.sum(outputs, dim=0)
-
+            
+        if c.isnan().sum() > 0:
+            raise Exception("NaN value encountered during init_center_c")
+        
         c /= n_samples
 
         # If c_i is too close to 0, set to +-eps. Reason: a zero unit can be trivially matched with zero weights.

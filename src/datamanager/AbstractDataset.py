@@ -11,6 +11,9 @@ class AbstractDataset(Dataset):
 
     def __init__(self, path: str, pct: float = 1.0, **kwargs):
         X = self.load_data(path)
+        if np.isnan(X).sum() > 0:
+            print("Dropping {} rows with NaN values".format(np.isnan(X).sum()))
+            X = X[~np.isnan(X).any(axis=1)]
         anomaly_label = kwargs.get('anomaly_label', 1)
         normal_label = kwargs.get('normal_label', 0)
 
@@ -67,7 +70,7 @@ class AbstractDataset(Dataset):
         return train_ldr, test_ldr
 
     def split_train_test(self, test_pct: float = .5, label: int = 0, seed=None) -> Tuple[Subset, Subset]:
-        assert label == 0 or label == 1
+        assert (label == 0 or label == 1)
 
         if seed:
             torch.manual_seed(seed)

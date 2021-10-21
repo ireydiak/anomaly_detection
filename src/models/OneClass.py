@@ -28,3 +28,6 @@ class DeepSVDD(BaseModel):
 
     def get_params(self) -> dict:
         return {'D': self.D, 'rep_dim': self.rep_dim}
+
+    def print_name(self):
+        return "DeepSVDD"

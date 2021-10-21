@@ -9,6 +9,14 @@ class IDS2018Dataset(AbstractDataset):
         return "ids2018"
 
 
+class IDS2017Dataset(AbstractDataset):
+
+    name = 'IDS2017'
+
+    def npz_key(self):
+        return "ids2017"
+
+
 class KDD10Dataset(AbstractDataset):
     """
     This class is used to load KDD Cup 10% dataset as a pytorch Dataset

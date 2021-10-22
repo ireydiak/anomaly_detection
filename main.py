@@ -6,10 +6,12 @@ import torch
 import os
 from src.datamanager.dataset import *
 from src.trainers.DeepSVDDTrainer import DeepSVDDTrainer
+from src.trainers.MemAETrainer import MemAETrainer
 from src.models.OneClass import DeepSVDD
+from src.models.AutoEncoder import MemAE
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-m', '--model', help='The selected model', choices=['DeepSVDD'], type=str)
+parser.add_argument('-m', '--model', help='The selected model', choices=['DeepSVDD', 'MemAE'], type=str)
 parser.add_argument('-d', '--dataset', help='The selected dataset', choices=['KDD10', 'NSLKDD', 'USBIDS', 'Arrhythmia', 'IDS2017'], type=str)
 parser.add_argument('-b', '--batch-size', help='Size of mini-batch', default=128, type=int)
 parser.add_argument('-e', '--epochs', help='Number of training epochs', default=100, type=int)
@@ -17,6 +19,7 @@ parser.add_argument('-o', '--output-path', help='Path to the output folder', def
 parser.add_argument('--n-runs', help='Number of time model is trained', default=20, type=int)
 parser.add_argument('--tau', help='Threshold beyond which samples are labeled as anomalies.', default=None, type=int)
 parser.add_argument('--pct', help='Percentage of original data to keep', default=1., type=float)
+parser.add_argument('--dataset-path', help='Path to the dataset (set when --timeout-params is empty)', type=str, default=None)
 parser.add_argument('--timeout-params', help='Hyphen-separated timeout parameters (FlowTimeout-Activity Timeout)', type=str, nargs='+')
 
 
@@ -50,19 +53,23 @@ def train_once(trainer, train_ldr, test_ldr, tau):
     print("Evaluating model with threshold tau=%d" % tau)
     return trainer.evaluate(y_true, scores, threshold=tau)
 
-
 def store_model(model, export_path: str):
     f = os.open("%s/%s.pt" % (export_path, model.print_name()), "w+")
     model.save(obj=model.state_dict(), f=f)
 
-def train_param(args, timeout_param: str):
-    base_path = "C:/Users/verdi/Documents/Datasets/IDS2017/CSV/"
-    dataset_path = base_path + timeout_param + '/processed/feature_group_5.npz'
-    export_path = base_path + timeout_param + '/results'
+def resolve_model_trainer(model_name: str, params: dict):
+    model, trainer = None, None
+    if model_name == 'DeepSVDD':
+        model = DeepSVDD(params['D'], device=params['device'])
+        trainer = DeepSVDDTrainer(model=model, n_epochs=params['n_epochs'])
+    elif model_name == 'MemAE':
+        model = MemAE(D=params['D'], rep_dim=params.get('rep_dim', 1), mem_dim = params.get('mem_dim', 50), device=params['device'])
+        trainer = MemAETrainer(model=model, alpha=params['alpha'], n_epochs=params['n_epochs'])
+    return model, trainer
 
+def train_param(args, device, dataset_path: str, export_path: str):
     ds = resolve_dataset(args.dataset, dataset_path, args.pct)
-    model = DeepSVDD(ds.D(), device=device).to(device)
-    trainer = DeepSVDDTrainer(model=model, n_epochs=args.epochs)
+    model, trainer = resolve_model_trainer(args.model, {'D': ds.D(), 'alpha': 2e-4, 'device': device, 'n_epochs': args.epochs})
     train_ldr, test_ldr = ds.loaders(batch_size=args.batch_size)
     tau = args.tau or int(np.ceil((1 - ds.anomaly_ratio) * 100))
 
@@ -92,9 +99,20 @@ if __name__ == '__main__':
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     print('Selected device %s' % device)
 
-    for param in args.timeout_params[0].split(' '):
-        print(f"Training model {args.model} on timeout params {param}")
-        train_param(args, param)
+    timeout_param = args.timeout_params
+    base_path = "C:/Users/verdi/Documents/Datasets/IDS2017/CSV/"
+    dataset_path = args.dataset_path or None
+    export_path = args.output_path or None
+    
+    if args.timeout_params:
+        for param in args.timeout_params:
+            dataset_path = base_path + param + '/processed/feature_group_5.npz'
+            export_path = base_path + param + '/results'
+            print(f"Training model {args.model} on timeout params {param}")
+            train_param(args, device, dataset_path, export_path)
+    else:
+        print(f"Training model {args.model} on {args.dataset}")
+        train_param(args, device, dataset_path, export_path)
    
 
 # 120s-5 'Precision': 0.5214370079473604, 'Recall': 0.5030861201879352, 'F1-Score': 0.5120972168351106, 'AUROC': 0.7969074778900092, 'AUPR': 0.5320399885254098

@@ -1,3 +1,4 @@
 from .BaseModel import BaseModel
-from .OneClass import DeepSVDD
 from .Energy import DSEBM
+from .MemoryModule import MemoryUnit
+from .OneClass import DeepSVDD

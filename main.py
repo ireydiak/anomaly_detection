@@ -21,6 +21,8 @@ parser.add_argument('--tau', help='Threshold beyond which samples are labeled as
 parser.add_argument('--pct', help='Percentage of original data to keep', default=1., type=float)
 parser.add_argument('--dataset-path', help='Path to the dataset (set when --timeout-params is empty)', type=str, default=None)
 parser.add_argument('--timeout-params', help='Hyphen-separated timeout parameters (FlowTimeout-Activity Timeout)', type=str, nargs='+')
+parser.add_argument('--seed', help='Specify a seed', type=int, default=None)
+parser.add_argument('--pct', help='Percentage of original data to keep', type=float, default=None)
 
 
 def resolve_dataset(dataset_name: str, path_to_dataset: str, pct: float) -> AbstractDataset:
@@ -53,9 +55,11 @@ def train_once(trainer, train_ldr, test_ldr, tau):
     print("Evaluating model with threshold tau=%d" % tau)
     return trainer.evaluate(y_true, scores, threshold=tau)
 
+
 def store_model(model, export_path: str):
     f = os.open("%s/%s.pt" % (export_path, model.print_name()), "w+")
     model.save(obj=model.state_dict(), f=f)
+
 
 def resolve_model_trainer(model_name: str, params: dict):
     model, trainer = None, None
@@ -67,10 +71,11 @@ def resolve_model_trainer(model_name: str, params: dict):
         trainer = MemAETrainer(model=model, alpha=params['alpha'], n_epochs=params['n_epochs'])
     return model, trainer
 
+
 def train_param(args, device, dataset_path: str, export_path: str):
     ds = resolve_dataset(args.dataset, dataset_path, args.pct)
     model, trainer = resolve_model_trainer(args.model, {'D': ds.D(), 'alpha': 2e-4, 'device': device, 'n_epochs': args.epochs})
-    train_ldr, test_ldr = ds.loaders(batch_size=args.batch_size)
+    train_ldr, test_ldr = ds.loaders(batch_size=args.batch_size, seed=args.seed)
     tau = args.tau or int(np.ceil((1 - ds.anomaly_ratio) * 100))
 
     training_start_time = dt.now()
@@ -92,6 +97,7 @@ def train_param(args, device, dataset_path: str, export_path: str):
     }
     store_results(all_params, res, model.print_name(), args.dataset, dataset_path, training_start_time, export_path)
     # store_model(model, export_path)
+
 
 if __name__ == '__main__':
     args = parser.parse_args()

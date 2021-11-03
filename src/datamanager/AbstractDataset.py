@@ -63,8 +63,9 @@ class AbstractDataset(Dataset):
                 test_pct: float = 0.5,
                 label: int = 0,
                 batch_size: int = 128,
-                num_workers: int = 0) -> (DataLoader, DataLoader):
-        train_set, test_set = self.split_train_test(test_pct, label)
+                num_workers: int = 0,
+                seed: int = None) -> (DataLoader, DataLoader):
+        train_set, test_set = self.split_train_test(test_pct, label, seed)
         train_ldr = DataLoader(dataset=train_set, batch_size=batch_size, num_workers=num_workers)
         test_ldr = DataLoader(dataset=test_set, batch_size=batch_size, num_workers=num_workers)
         return train_ldr, test_ldr

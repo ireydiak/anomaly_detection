@@ -6,11 +6,13 @@ from torch.utils.data.dataloader import DataLoader
 from torch import optim
 from tqdm import trange
 import torch
+import neptune.new as neptune
 
 
 class BaseTrainer(ABC):
-    
-    def __init__(self, model, lr: float = 1e-4, n_epochs: int = 100, batch_size: int = 128, n_jobs_dataloader: int = 0, device: str = 'cuda'):
+
+    def __init__(self, model, lr: float = 1e-4, n_epochs: int = 100, batch_size: int = 128, n_jobs_dataloader: int = 0,
+                 device: str = 'cuda'):
         self.device = device
         self.model = model.to(device)
         self.batch_size = batch_size
@@ -26,14 +28,23 @@ class BaseTrainer(ABC):
     def score(self, sample: torch.Tensor):
         pass
 
-    @abstractmethod
-    def test(self, dataset: DataLoader) -> Union[np.array, np.array]:
-        pass
-    
+    def after_training(self):
+        """
+        Perform any action after training is done
+        """
+        print("Finished training")
 
-    def train(self, dataset: DataLoader):
+    def before_training(self, dataset: DataLoader):
+        """
+        Optionally perform pre-training or other operations.
+        """
+        pass
+
+    def train(self, dataset: DataLoader, nep: neptune.Run = None):
         self.model.train()
         optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+
+        self.before_training(dataset)
 
         print('Started training')
         for epoch in range(self.n_epochs):
@@ -48,7 +59,8 @@ class BaseTrainer(ABC):
                     optimizer.zero_grad()
 
                     loss = self.train_iter(X)
-
+                    if nep:
+                        nep["training/metrics/batch/loss"] = loss
                     # Backpropagation
                     loss.backward()
                     optimizer.step()
@@ -58,7 +70,7 @@ class BaseTrainer(ABC):
                     loss='{:05.3f}'.format(epoch_loss),
                 )
                 t.update()
-        print("Finished training")
+        self.after_training()
 
     def test(self, dataset: DataLoader) -> Union[np.array, np.array]:
         self.model.eval()
@@ -74,9 +86,10 @@ class BaseTrainer(ABC):
                 scores.extend(score.cpu().tolist())
 
         return np.array(y_true), np.array(scores)
-    
+
     def get_params(self) -> dict:
-        return self.model.get_params()
+        return {"learning_rate": self.lr, "epochs": self.n_epochs, "batch_size": self.batch_size,
+                **self.model.get_params()}
 
     def evaluate(self, y_true: np.array, scores: np.array, pos_label: int = 1, threshold: int = 80) -> dict:
         res = {"Precision": -1, "Recall": -1, "F1-Score": -1, "AUROC": -1, "AUPR": -1}
@@ -84,7 +97,7 @@ class BaseTrainer(ABC):
         thresh = np.percentile(scores, threshold)
         y_pred = (scores >= thresh).astype(int)
         res["Precision"], res["Recall"], res["F1-Score"], _ = metrics.precision_recall_fscore_support(
-        y_true, y_pred, average='binary', pos_label=pos_label
+            y_true, y_pred, average='binary', pos_label=pos_label
         )
 
         res["AUROC"] = metrics.roc_auc_score(y_true, scores)

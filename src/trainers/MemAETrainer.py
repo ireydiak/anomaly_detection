@@ -1,10 +1,4 @@
-from typing import Union
-from sklearn import metrics
-from torch.utils.data.dataloader import DataLoader
-import torch.optim as optim
 import torch
-import numpy as np
-from tqdm import trange
 from . import BaseTrainer
 from torch import nn
 from ..loss import EntropyLoss

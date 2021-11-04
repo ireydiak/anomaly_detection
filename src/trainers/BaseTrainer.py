@@ -26,11 +26,6 @@ class BaseTrainer(ABC):
     def score(self, sample: torch.Tensor):
         pass
 
-    @abstractmethod
-    def test(self, dataset: DataLoader) -> Union[np.array, np.array]:
-        pass
-    
-
     def train(self, dataset: DataLoader):
         self.model.train()
         optimizer = optim.Adam(self.model.parameters(), lr=self.lr)

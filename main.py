@@ -9,6 +9,8 @@ from src.trainers.DeepSVDDTrainer import DeepSVDDTrainer
 from src.trainers.MemAETrainer import MemAETrainer
 from src.models.OneClass import DeepSVDD
 from src.models.AutoEncoder import MemAE
+import neptune.new as neptune
+from dotenv import dotenv_values
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-m', '--model', help='The selected model', choices=['DeepSVDD', 'MemAE'], type=str)
@@ -18,11 +20,11 @@ parser.add_argument('-e', '--epochs', help='Number of training epochs', default=
 parser.add_argument('-o', '--output-path', help='Path to the output folder', default=None, type=str)
 parser.add_argument('--n-runs', help='Number of time model is trained', default=20, type=int)
 parser.add_argument('--tau', help='Threshold beyond which samples are labeled as anomalies.', default=None, type=int)
-parser.add_argument('--pct', help='Percentage of original data to keep', default=1., type=float)
-parser.add_argument('--dataset-path', help='Path to the dataset (set when --timeout-params is empty)', type=str, default=None)
+parser.add_argument('-p', '--dataset-path', help='Path to the dataset (set when --timeout-params is empty)', type=str, default=None)
 parser.add_argument('--timeout-params', help='Hyphen-separated timeout parameters (FlowTimeout-Activity Timeout)', type=str, nargs='+')
 parser.add_argument('--seed', help='Specify a seed', type=int, default=None)
-parser.add_argument('--pct', help='Percentage of original data to keep', type=float, default=None)
+parser.add_argument('--pct', help='Percentage of original data to keep', type=float, default=1.)
+parser.add_argument('--use-neptune', help='Use Neptune.ai to track training metadata', type=bool, default=False)
 
 
 def resolve_dataset(dataset_name: str, path_to_dataset: str, pct: float) -> AbstractDataset:
@@ -46,8 +48,8 @@ def store_results(results: dict, params: dict, model_name: str, dataset: str, pa
         f.write("-".join("" for _ in range(len(hdr))) + "\n")
 
 
-def train_once(trainer, train_ldr, test_ldr, tau):
-    trainer.train(train_ldr)
+def train_once(trainer, train_ldr, test_ldr, tau, nep):
+    trainer.train(train_ldr, nep)
     y_train_true, train_scores = trainer.test(train_ldr)
     y_test_true, test_scores = trainer.test(test_ldr)
     y_true = np.concatenate((y_train_true, y_test_true), axis=0)
@@ -72,31 +74,67 @@ def resolve_model_trainer(model_name: str, params: dict):
     return model, trainer
 
 
+def load_neptune(mode: str, dataset: str) -> neptune.Run:
+    cfg = dotenv_values()
+    return neptune.init(
+        project=cfg["neptune_project"],
+        api_token=cfg["neptune_api_token"],
+        tags=["pytorch", dataset],
+        mode=mode
+    )
+
+
 def train_param(args, device, dataset_path: str, export_path: str):
+
+    # (neptune) initialize neptune
+    mode = 'async' if args.use_neptune else 'offline'
+    run = load_neptune(mode, args.dataset)
+
+    # Load train_set, test_set, trainer and model
     ds = resolve_dataset(args.dataset, dataset_path, args.pct)
-    model, trainer = resolve_model_trainer(args.model, {'D': ds.D(), 'alpha': 2e-4, 'device': device, 'n_epochs': args.epochs})
+    model, trainer = resolve_model_trainer(
+        args.model, {'D': ds.D(), 'alpha': 2e-4, 'device': device, 'n_epochs': args.epochs}
+    )
     train_ldr, test_ldr = ds.loaders(batch_size=args.batch_size, seed=args.seed)
+
+    # (neptune) log datasets sizes
+    run["data/train/size"] = len(train_ldr)
+    run["data/test/size"] = len(test_ldr)
+
+    # (neptune) set parameters to be uploaded
     tau = args.tau or int(np.ceil((1 - ds.anomaly_ratio) * 100))
+    all_params = {
+        "N": ds.N,
+        "runs": args.n_runs,
+        "anomaly_threshold": tau,
+        "anomaly_ratio": "%1.4f" % ds.anomaly_ratio,
+        **trainer.get_params()
+    }
+    run["parameters"] = all_params
 
     training_start_time = dt.now()
-    print("Training %s with shape %s anomaly ratio %1.4f %s times" % (args.model, ds.shape(), ds.anomaly_ratio, args.n_runs))
+    print("Training %s with shape %s anomaly ratio %1.4f" % (args.model, ds.shape(), ds.anomaly_ratio))
     P, R, FS, ROC, PR = [], [], [], [], []
     for i in range(args.n_runs):
         print(f"Run {i}/{args.n_runs}")
-        metrics = train_once(trainer, train_ldr, test_ldr, tau)
+        metrics = train_once(trainer, train_ldr, test_ldr, tau, run)
         print(metrics)
         for m, val in zip([P, R, FS, ROC, PR], metrics.values()):
             m.append(val)
+        # (neptune) log metrics for this run
+        for nep_key, dict_key in zip(['precision', 'recall', 'fscore'], ['Precision', 'Recall', 'F1-Score']):
+            run["training/metrics/run_{}/{}".format(i, nep_key)].log(metrics[dict_key], step=i)
         model.reset()
     P, R, FS, ROC, PR = np.array(P), np.array(R), np.array(FS), np.array(ROC), np.array(PR)
     res = defaultdict()
     for vals, key in zip([P, R, FS, ROC, PR], ["Precision", "Recall", "F1-Score", "AUROC", "AUPR"]):
         res[key] = "%2.4f (%2.4f)" % (vals.mean(), vals.std())
-    all_params = {
-        "N": ds.N, "runs": args.n_runs, "epochs": args.epochs, "tau": tau, "rho": "%1.4f" % ds.anomaly_ratio, **model.get_params()
-    }
+        # (neptune) store final metrics
+        run["training/evaluation/" + key] = res[key]
+
     store_results(all_params, res, model.print_name(), args.dataset, dataset_path, training_start_time, export_path)
     # store_model(model, export_path)
+    run.stop()
 
 
 if __name__ == '__main__':

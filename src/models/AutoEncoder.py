@@ -3,33 +3,56 @@ from torch.nn.modules.activation import Tanh
 from . import MemoryUnit
 from . import BaseModel
 import torch
+from torch import Tensor
+from .utils import create_network
+from typing import Tuple
+
+
+class AutoEncoder(BaseModel):
+    def __init__(self, enc_layers, dec_layers):
+        super(AutoEncoder, self).__init__()
+        self.encoder = create_network(enc_layers)
+        self.decoder = create_network(dec_layers)
+        self.L = dec_layers[0][0]
+        self.code_shape = enc_layers[-1][1]
+
+    def encode(self, X):
+        return self.encoder(X)
+
+    def decode(self, X):
+        return self.decoder(X)
+
+    def forward(self, X):
+        z = self.encoder(X)
+        x_prime = self.decoder(z)
+        return x_prime, z
 
 
 class MemAE(BaseModel):
 
-    def __init__(self, D: int, mem_dim: int=50, rep_dim: int=1, device='cpu'):
+    def __init__(self, D: int, mem_dim: int = 50, rep_dim: int = 1, device='cpu'):
         super(MemAE, self).__init__()
         self.D = D
         self.mem_dim = mem_dim
         self.device = device
         self.rep_dim = rep_dim
         self._build_net()
-    
+
     def _build_net(self):
-        D, L = self.D, self.rep_dim 
+        D, L = self.D, self.rep_dim
         self.enc = nn.Sequential(
-            nn.Linear(D, D//2),
+            nn.Linear(D, D // 2),
             nn.Tanh(),
-            nn.Linear(D//2, D//4),
+            nn.Linear(D // 2, D // 4),
             nn.Tanh(),
-            nn.Linear(D//4, L)
+            nn.Linear(D // 4, L)
         ).to(self.device)
         self.dec = nn.Sequential(
-            nn.Linear(L, D//4),
+            nn.Linear(L, D // 4),
             nn.Tanh(),
-            nn.Linear(D//4, D//2),
+            nn.Linear(D // 4, D // 2),
             nn.Tanh(),
-            nn.Linear(D//2, D)
+            nn.Linear(D // 2, D)
         ).to(self.device)
         self.mem_module = MemoryUnit(self.mem_dim, self.rep_dim)
 
@@ -41,7 +64,7 @@ class MemAE(BaseModel):
 
     def print_name(self) -> str:
         return "MemAE"
-    
+
     def get_params(self) -> dict:
         return {
             'rep_dim': self.rep_dim,
@@ -49,7 +72,7 @@ class MemAE(BaseModel):
         }
 
 
-class MLAD(nn.Module):
+class MLAD(BaseModel):
 
     def __init__(
             self, D: int, L: int, K: int, **kwargs
@@ -64,32 +87,80 @@ class MLAD(nn.Module):
         """
         super(MLAD, self).__init__()
         # Common network
-        self.common_net = Encoder([(D, 64, nn.ReLU()), (64, 64, nn.ReLU()), (64, L, nn.Sigmoid())])
+        self.common_net = create_network([
+            (D, 64, nn.ReLU()),
+            (64, 64, nn.ReLU()),
+            (64, L, nn.Sigmoid())
+        ])
+        # self.common_net = nn.Sequential(
+        #     nn.Linear(D, 64),
+        #     nn.ReLU(),
+        #     nn.Linear(64, 64),
+        #     nn.ReLU(),
+        #     nn.Linear(64, L),
+        #     nn.Sigmoid()
+        # )
         # Error network
-        err_net_layers = kwargs.get('error_layers', [(D, 64, nn.ReLU()), (64, 64, nn.ReLU()), (64, L, nn.Sigmoid())])
-        self.error_net = Encoder(err_net_layers)
+        self.error_net = create_network([
+            (D, 64, nn.ReLU()),
+            (64, 64, nn.ReLU()),
+            (64, L, nn.Sigmoid())
+        ])
+        # self.error_net = nn.Sequential(
+        #     nn.Linear(D, 64),
+        #     nn.ReLU(),
+        #     nn.Linear(64, 64),
+        #     nn.ReLU(),
+        #     nn.Linear(64, L),
+        #     nn.Sigmoid()
+        # )
         # Representation network (Decoder)
-        repr_net_layers = kwargs.get(
-            'representation_layers', [(2 * L, 64, nn.ReLU()), (64, 96, nn.ReLU()), (96, D, nn.Sigmoid())]
-        )
-        self.repr_net = Decoder(repr_net_layers)
+        # repr_net_layers = kwargs.get(
+        #     'representation_layers', [(2 * L, 64, nn.ReLU()), (64, 96, nn.ReLU()), (96, D, nn.Sigmoid())]
+        # )
+        self.reconstructor_net = create_network([
+            (2 * L, 64, nn.ReLU()),
+            (64, 96, nn.ReLU()),
+            (96, D, nn.Sigmoid())
+        ])
+        # self.reconstructor = nn.Sequential(
+        #     nn.Linear(2 * L, 64),
+        #     nn.ReLU(),
+        #     nn.Linear(64, 96),
+        #     nn.ReLU(),
+        #     nn.Linear(96, D, nn.Sigmoid())
+        # )
         # Exchanger network (Decoder)
-        exchange_net_layers = kwargs.get(
-            'exchanger_layers', [(L, 64, nn.ReLU()), (64, 64, nn.ReLU()), (64, D, nn.Sigmoid())]
-        )
-        self.exchange_net = Decoder(exchange_net_layers)
+        # exchange_net_layers = kwargs.get(
+        #     'exchanger_layers', [(L, 64, nn.ReLU()), (64, 64, nn.ReLU()), (64, D, nn.Sigmoid())]
+        # )
+        self.exchange_net = create_network([
+            (L, 64, nn.ReLU()),
+            (64, 64, nn.ReLU()),
+            (64, D, nn.Sigmoid())
+        ])
         # GMM network
         gmm_net_layers = kwargs.get('gmm_layers', [
             ((L, 16, nn.ReLU()), (16, 16, nn.ReLU()), (16, K, nn.Softmax(dim=1))),
             ((K, 16, nn.ReLU()), (16, 16, nn.ReLU()), (16, L, nn.Sigmoid()))
         ])
-        self.gmm_net = AutoEncoder(gmm_net_layers[0], gmm_net_layers[1])
-        self.lambda_1 = kwargs.get('lambda_1', 1e-04)
-        self.lambda_2 = kwargs.get('lambda_2', 0.01)
-        self.lambda_3 = kwargs.get('lambda_3', 1e-04)
+        self.gmm_enc_net = AutoEncoder(gmm_net_layers[0], gmm_net_layers[1])
+        self.lamb_1 = kwargs.get('lambda_1', 1e-04)
+        self.lamb_2 = kwargs.get('lambda_2', 1)
+        self.lamb_3 = kwargs.get('lambda_3', 1)
+        self.lamb_4 = kwargs.get('lambda_4', 1e-04)
+        self.lamb_5 = kwargs.get('lambda_5', 1e-04)
+
         self.K = K
         self.L = L
         self.D = D
+
+    def get_params(self) -> dict:
+        return {
+            'latent_dim': self.L,
+            'input_dim': self.D,
+            'num_mixtures': self.K
+        }
 
     def reconstruction_loss(self, X_1_hat: Tensor, X_2_hat: Tensor, X_1: Tensor, X_2: Tensor):
         loss = nn.MSELoss()
@@ -101,7 +172,7 @@ class MLAD(nn.Module):
 
     def gmm_loss(self, common_1: Tensor, common_2: Tensor, gmm_1: Tensor, gmm_2: Tensor):
         loss = nn.MSELoss()
-        return loss(common_1, gmm_1) + loss(common_2, gmm_2)
+        return self.lamb_4 * loss(common_1, gmm_1) + self.lamb_4 * loss(common_2, gmm_2)
 
     def common_loss(self, common_1: Tensor, common_2: Tensor):
         loss = nn.MSELoss()
@@ -144,9 +215,9 @@ class MLAD(nn.Module):
         # Metric Loss
         metric_loss = sum([self.metric_loss(dot_metric, metric_label) for dot_metric in dot_metrics])
         # Compute losses
-        loss_A = self.lambda_1 * common_loss_A + rec_loss_A + ex_loss_A + self.lambda_2 * (gmm_loss_A + gmm_loss_B)
-        loss_B = self.lambda_1 * common_loss_B + rec_loss_B + ex_loss_B + self.lambda_2 * (gmm_loss_B + gmm_loss_B)
-        loss_metric = self.lambda_3 * metric_loss
+        loss_A = self.lamb_1 * common_loss_A + self.lamb_2 * rec_loss_A + self.lamb_3 * ex_loss_A + gmm_loss_A
+        loss_B = self.lamb_1 * common_loss_B + self.lamb_2 * rec_loss_B + self.lamb_3 * ex_loss_B + gmm_loss_B
+        loss_metric = self.lambda_5 * metric_loss
         return loss_A + loss_B + loss_metric
 
     def forward_one(self, X: Tensor) -> (float, float, float, float, float):
@@ -195,7 +266,7 @@ class MLAD(nn.Module):
         rec_2 = self.repr_net(mix_2)
         return (common_1, common_2), (err_1, err_2), (gmm_1, gmm_2), (gmm_z_1, gmm_z_2), (ex_1, ex_2), (rec_1, rec_2)
 
-    def forward(self, X_1: Tensor, X_2: Tensor, Z_1: Tensor, Z_2: Tensor) -> (Tuple, Tuple, Tuple, Tuple, Tuple, Tuple):
+    def forward(self, X_1: Tensor, X_2: Tensor, Z_1: Tensor, Z_2: Tensor) -> Tuple[Tuple, Tuple, Tuple, Tuple, Tuple, Tuple]:
         """
         Performs a forward pass on the model.
         Since we are using a siamese two-input stream network, the forward pass is decoupled into multiple

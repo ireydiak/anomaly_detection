@@ -2,44 +2,33 @@ import random
 
 import torch
 from sklearn.cluster import KMeans
+from torch.utils.data import DataLoader
 from tqdm import trange
 
 from . import BaseTrainer
 from torch import Tensor, optim
 import numpy as np
 from typing import List, Tuple
+from ..distributions import multivariate_normal_pdf, estimate_GMM_params
 
 
 class MLADTrainer(BaseTrainer):
 
-    # def __init__(self, alpha: float, **kwargs) -> None:
-    #     super(MemAETrainer, self).__init__(**kwargs)
-    #     self.alpha = alpha
-    #     self.recon_loss_fn = nn.MSELoss().to(self.device)
-    #     self.entropy_loss_fn = EntropyLoss().to(self.device)
-    #
-    # def train_iter(self, sample: torch.Tensor):
-    #     x_hat, w_hat = self.model(sample)
-    #     R = self.recon_loss_fn(sample, x_hat)
-    #     E = self.entropy_loss_fn(w_hat)
-    #     return R + (self.alpha * E)
-    #
-    # def score(self, sample: torch.Tensor):
-    #     x_hat, _ = self.model(sample)
-    #     return torch.sum((sample - x_hat) ** 2, axis=1)
+    def train_iter(self, sample: torch.Tensor):
+        pass
 
-    def __init__(self, train_set, test_set, **kwargs):
+    def __init__(self, train_set, **kwargs):
         super(MLADTrainer, self).__init__(**kwargs)
-        self.train_set = train_set
-        self.test_set = test_set
+        # Unlike other methods, MLAD requires the train_set as a parameter because of the re-sampling and clustering
+        # that happens at the beginning of every epoch iteration
+        self.train_set = train_set.to(self.device)
         self.D = self.train_set.shape[1]
         self.K = kwargs.get('K', 4)
-        self.L = kwargs.get('L', 1)
 
     def fit_clusters(self, X: Tensor) -> np.ndarray:
         # TODO: Question: train common_net prior or just a single pass?
         Z = self.model.common_pass(X)
-        clusters = KMeans(n_clusters=self.K, random_state=0).fit(Z.detach().numpy())
+        clusters = KMeans(n_clusters=self.K, random_state=0).fit(Z.detach().cpu().numpy())
         return clusters.labels_
 
     def create_batches(self, X_1: Tensor, X_2: Tensor, Z_1: Tensor, Z_2: Tensor, metric_input) -> List[Tuple]:
@@ -73,19 +62,20 @@ class MLADTrainer(BaseTrainer):
         metric_label = (torch.abs(x_label - z_label) == 0).float()
         return input_x1, input_x2, input_z1, input_z2, metric_label
 
-    def create_samples(self, clusters) -> Tuple[List[Tuple], Tensor]:
+    def create_samples(self, clusters) -> List[Tuple]:
         assert self.D
-        input_x1 = torch.zeros(0, self.D)
-        input_x2 = torch.zeros(0, self.D)
-        x_label = torch.zeros(0, 1)
+        input_x1 = torch.zeros(0, self.D).to(self.device)
+        input_x2 = torch.zeros(0, self.D).to(self.device)
+        x_label = torch.zeros(0, 1).to(self.device)
 
         for i in range(0, self.K):
             [coding_index] = np.where(clusters == i)
-            input_x1 = torch.vstack((input_x1, self.train_set[coding_index, :]))
+            input_x1 = torch.vstack((input_x1, self.train_set[coding_index, :])).to(self.device)
             np.random.shuffle(coding_index)
             # TODO: we run the risk of training the model on the same data
-            input_x2 = torch.vstack((input_x2, self.train_set[coding_index, :]))
-            x_label = torch.vstack((x_label, torch.ones([len(coding_index), 1]) * i))
+            input_x2 = torch.vstack((input_x2, self.train_set[coding_index, :])).to(self.device)
+            k_labels = (torch.ones([len(coding_index), 1]) * i).to(self.device)
+            x_label = torch.vstack((x_label, k_labels)).to(self.device)
 
         input_x1, input_x2, input_z1, input_z2, metric_label = self.split_siamese(
             input_x1, input_x2, x_label
@@ -93,28 +83,30 @@ class MLADTrainer(BaseTrainer):
 
         return self.create_batches(input_x1, input_x2, input_z1, input_z2, metric_label)
 
-    def train(self, n_epochs) -> list:
-        train_loss = 0.0
-        loss_history = []
+    def train(self, dataset: DataLoader):
         optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
 
-        for epoch in range(n_epochs):
-            print("Epoch: {} of {}".format(epoch + 1, n_epochs))
+        for epoch in range(self.n_epochs):
+            print("Epoch {}/{}".format(epoch + 1, self.n_epochs))
             clusters = self.fit_clusters(self.train_set)
             batches = self.create_samples(clusters)
             with trange(len(batches)) as t:
-                for i, meta_tup in enumerate(batches):
-                    X_tup, Z_tup, metric_label = meta_tup[0], meta_tup[1], meta_tup[2]
-                    loss = self.forward(*X_tup, *Z_tup, metric_label)
+                for i, tup in enumerate(batches):
                     optimizer.zero_grad()
+
+                    X_tup, Z_tup, metric_label = tup[0], tup[1], tup[2]
+                    X_1, X_2 = X_tup[0].to(self.device).float(), X_tup[1].to(self.device).float()
+                    Z_1, Z_2 = Z_tup[0].to(self.device).float(), Z_tup[1].to(self.device).float()
+                    metric_labels = metric_labels.to(self.device).float()
+
+                    loss = self.forward(X_1, X_2, Z_1, Z_2, metric_label)
                     loss.backward()
                     optimizer.step()
-                    train_loss += loss.item()
-                    loss_history.append(loss.item())
-                    t.set_postfix(loss='{:05.3f}'.format(train_loss / (i + 1)))
+
+                    train_loss = loss.item()
+                    t.set_postfix(loss='{:05.3f}'.format(train_loss))
                     t.update()
-                print('Cumulative loss = {:10.4f}'.format(sum(loss_history)))
-        return loss_history
+        print("Finished training")
 
     def compute_density(self, X: Tensor, phi: Tensor, mu: Tensor, Sigma: Tensor):
         density = 0.0
@@ -124,87 +116,23 @@ class MLADTrainer(BaseTrainer):
         return density
 
     def compute_densities(self, X: Tensor, phi: Tensor, mu: Tensor, Sigma: Tensor) -> np.ndarray:
+        self.model.eval()
         Z = self.model.common_pass(X)
-        self.verbose and print(
-            f'calculating GMM densities using \u03C6={phi.shape}, \u03BC={mu.shape}, \u03A3={Sigma.shape}')
+        print(f'calculating GMM densities using \u03C6={phi.shape}, \u03BC={mu.shape}, \u03A3={Sigma.shape}')
         densities = np.zeros(len(Z))
         # TODO: replace loops by matrix operations
         for i in range(0, len(Z)):
             densities[i] = self.compute_density(Z[i], phi, mu, Sigma)
         return densities
 
-    def evaluate(self, y, densities, p):
-        anomaly_idx = np.where(densities > p)
-        y_hat = np.zeros(len(densities))
-        if len(anomaly_idx) > 0:
-            y_hat[anomaly_idx] = 1
-        return accuracy_precision_recall_f1_scores(y.squeeze(), y_hat)
-
-    def find_optimal_threshold(self, y_true: np.array, densities: np.array, scale_coef: float = 0.3125,
-                               n_iter: int = 20_000):
-        """
-        Implements Jianhai's original method `Functions.search_Threshold_Metric`.
-
-        Parameters
-        ----------
-        y_true
-        densities
-        scale_coef
-        n_iter
-
-        Returns
-        -------
-
-        """
-        # `p` refers to the anomaly threshold
-        p_hist = f1_hist = list()
-        for i in range(n_iter):
-            p = 10 ** (-i * scale_coef)
-            p_hist.append(p)
-            if self.verbose and (i + 1) % 10 == 0:
-                print(f'iter {i}: threshold={p}')
-            acc, precision, recall, f1 = self.evaluate(y_true.squeeze(), densities, p)
-            f1_hist.append(f1)
-        # The best p-threshold is the one that yield the best F1-Score
-        idx_max = np.argmax(np.array(f1_hist))
-        # TODO: Return threshold and not scores
-        acc, precision, recall, f1 = self.evaluate(y_true.squeeze(), densities, p_hist[idx_max])
-        return {'Accuracy': acc, 'Precision': precision, 'Recall': recall, 'F1-Score': f1}, p_hist[idx_max]
-
-    def rename_later(self, X):
-        """
-        TODO: Rename
-        Parameters
-        ----------
-        X
-
-        Returns
-        -------
-
-        """
+    def score(self, sample: torch.Tensor):
+        self.model.eval()
         # 1- estimate GMM parameters
-        Z = self.model.common_pass(X)
+        Z = self.model.common_pass(sample)
         _, gmm_z = self.model.gmm_net(Z)
         phi, mu, Sigma = estimate_GMM_params(Z, gmm_z)
         # 2- compute densities based on computed GMM parameters
-        return self.compute_densities(X, phi, mu, Sigma)
-
-    def evaluate_on_test_set(self, energy_threshold=None):
-        self.model.eval()
-        test_set = self.dm.get_test_set().dataset.dataset.X
-        test_y = self.dm.get_test_set().dataset.dataset.y
-        with torch.no_grad():
-            train_density = self.rename_later(self.train_set)
-            test_density = self.rename_later(self.test_set)
-            densities = np.concatenate((
-                train_density,
-                test_density
-            ))
-            thres = np.percentile(densities, 80)
-            print(self.evaluate(test_y.squeeze(), test_density, thres))
-
-            # 3- Find best p threshold
-            return self.find_optimal_threshold(test_y, test_density)
+        return self.compute_densities(sample, phi, mu, Sigma)
 
     def forward(self, X_1: Tensor, X_2: Tensor, Z_1: Tensor, Z_2: Tensor, metric_labels: Tensor):
         com_meta_tup, err_meta_tup, gmm_meta_tup, dot_met, ex_meta_tup, rec_meta_tup = self.model(X_1, X_2, Z_1, Z_2)

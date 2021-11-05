@@ -30,3 +30,6 @@ class BaseModel(nn.Module):
 
     def print_name(self):
         return self.__class__
+
+    def get_params(self):
+        pass

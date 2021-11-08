@@ -3,3 +3,5 @@
 catboost_info/
 *results*.txt
 __pycache__
+.env
+.neptune

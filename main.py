@@ -66,7 +66,6 @@ def store_model(model, export_path: str):
 
 
 def resolve_model_trainer(model_name: str, params: dict):
-    model, trainer = None, None
     if model_name == 'DeepSVDD':
         model = DeepSVDD(params['D'], device=params['device'])
         trainer = DeepSVDDTrainer(model=model, n_epochs=params['n_epochs'])
@@ -98,8 +97,7 @@ def train_param(args, device, dataset_path: str, export_path: str):
     tau = args.tau or int(np.ceil((1 - ds.anomaly_ratio) * 100))
 
     training_start_time = dt.now()
-    print("Training %s with shape %s anomaly ratio %1.4f %s times" % (
-    args.model, ds.shape(), ds.anomaly_ratio, args.n_runs))
+    print("Training %s with shape %s anomaly ratio %1.4f %s times" % (args.model, ds.shape(), ds.anomaly_ratio, args.n_runs))
     P, R, FS, ROC, PR = [], [], [], [], []
     for i in range(args.n_runs):
         print(f"Run {i+1}/{args.n_runs}")

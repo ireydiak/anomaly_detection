@@ -8,7 +8,7 @@ from tqdm import trange
 from . import BaseTrainer
 from torch import Tensor, optim
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Union
 from ..distributions import multivariate_normal_pdf, estimate_GMM_params
 
 
@@ -24,6 +24,7 @@ class MLADTrainer(BaseTrainer):
         self.train_set = train_set.to(self.device)
         self.D = self.train_set.shape[1]
         self.K = kwargs.get('K', 4)
+        self.phi, self.mu, self.Sigma = None, None, None
 
     def fit_clusters(self, X: Tensor) -> np.ndarray:
         # TODO: Question: train common_net prior or just a single pass?
@@ -97,7 +98,7 @@ class MLADTrainer(BaseTrainer):
                     X_tup, Z_tup, metric_label = tup[0], tup[1], tup[2]
                     X_1, X_2 = X_tup[0].to(self.device).float(), X_tup[1].to(self.device).float()
                     Z_1, Z_2 = Z_tup[0].to(self.device).float(), Z_tup[1].to(self.device).float()
-                    metric_labels = metric_labels.to(self.device).float()
+                    metric_label = metric_label.to(self.device).float()
 
                     loss = self.forward(X_1, X_2, Z_1, Z_2, metric_label)
                     loss.backward()
@@ -108,31 +109,101 @@ class MLADTrainer(BaseTrainer):
                     t.update()
         print("Finished training")
 
+    def estimate_gmm_params(self, X: torch.Tensor):
+        self.model.eval()
+
+        Z = self.model.common_pass(X)
+        _, gmm_z = self.model.gmm_net(Z)
+        return estimate_GMM_params(Z, gmm_z, device=self.device)
+
     def compute_density(self, X: Tensor, phi: Tensor, mu: Tensor, Sigma: Tensor):
         density = 0.0
         # TODO: replace loops by matrix operations
         for k in range(0, self.K):
-            density += multivariate_normal_pdf(X, phi[k], mu[k], Sigma[k, :, :])
+            density += multivariate_normal_pdf(X, phi[k], mu[k], Sigma[k, :, :], scaling=False, device=self.device)
         return density
 
     def compute_densities(self, X: Tensor, phi: Tensor, mu: Tensor, Sigma: Tensor) -> np.ndarray:
         self.model.eval()
+
         Z = self.model.common_pass(X)
-        print(f'calculating GMM densities using \u03C6={phi.shape}, \u03BC={mu.shape}, \u03A3={Sigma.shape}')
         densities = np.zeros(len(Z))
         # TODO: replace loops by matrix operations
         for i in range(0, len(Z)):
             densities[i] = self.compute_density(Z[i], phi, mu, Sigma)
-        return densities
+        return Tensor(densities).to(self.device)
+
+    def GMM_density_estimate(self, x, phy, mu, sigma, L):
+        density = 0
+        # TODO: Error? Where is det(2*pi*Sigma)
+        for k in range(0, len(phy)):
+            inv_sigma = np.linalg.inv(np.mat(sigma[k, :, :]) + np.eye(L) * 1e-6)
+            temp = np.dot(np.mat(x - mu[k, :]), inv_sigma)
+            temp = np.dot(temp, np.transpose(np.mat(x - mu[k, :])))
+            temp = np.exp((-0.5) * temp)
+            density = density + phy[k] * temp
+        return (np.array(density))[0][0]
+
+    def calculate_GMM_densities(self, sample_coding, phy, mu, sigma, L):
+        print(f'calculating GMM densities using \u03C6={phy.shape}, \u03BC={mu.shape}, \u03A3={sigma.shape}')
+        test_density = np.zeros([len(sample_coding)])
+        for i in range(0, len(sample_coding)):
+            test_density[i] = self.GMM_density_estimate(sample_coding[i, :], phy, mu, sigma, L)
+
+        return test_density
+
+    def calculate_GMM_parameters(self, gmm_coding, train_set_coding, K, L):
+        gamma_sum = gmm_coding.sum(0)
+        phy = np.mean(gmm_coding, axis=0)
+        mu = np.zeros([K, L])
+        sigma = np.zeros([K, L, L])
+
+        for k in range(0, K):
+            mu_tmp = np.zeros([train_set_coding.shape[1]])
+            for i in range(0, train_set_coding.shape[0]):
+                mu_tmp = mu_tmp + gmm_coding[i, k] * train_set_coding[i, :]
+            # mu[k, :] = mu_tmp / train_set_coding.shape[0]
+            mu[k, :] = mu_tmp / gamma_sum[k]
+        for k in range(0, K):
+            sigma_tmp = np.zeros([train_set_coding.shape[1], train_set_coding.shape[1]])
+            for i in range(0, train_set_coding.shape[0]):
+                sigma_tmp = sigma_tmp + gmm_coding[i, k] * np.dot(
+                    np.transpose(np.mat(train_set_coding[i, :] - mu[k, :])), np.mat(train_set_coding[i, :] - mu[k, :]))
+            # mu[k,:]=mu_tmp/np.sum(train2_coding[:,k])
+            # sigma[k, :, :] = sigma_tmp / train_set_coding.shape[0]
+            sigma[k, :, :] = sigma_tmp / gamma_sum[k]
+
+        return phy, mu, sigma
 
     def score(self, sample: torch.Tensor):
+        pass
+
+    def test(self, dataset: DataLoader) -> Union[np.array, np.array]:
         self.model.eval()
-        # 1- estimate GMM parameters
-        Z = self.model.common_pass(sample)
-        _, gmm_z = self.model.gmm_net(Z)
-        phi, mu, Sigma = estimate_GMM_params(Z, gmm_z)
-        # 2- compute densities based on computed GMM parameters
-        return self.compute_densities(sample, phi, mu, Sigma)
+        y_true, scores = [], []
+        with torch.no_grad():
+            print("Estimating GMM parameters")
+            if self.phi is None:
+                train_set_coding = self.model.common_pass(self.train_set)
+                _, gmm_coding = self.model.gmm_net(train_set_coding)
+                self.phi, self.mu, self.Sigma = self.calculate_GMM_parameters(
+                    gmm_coding.cpu().numpy(), train_set_coding.cpu().numpy(), self.K, self.model.L
+                )
+            test_set_coding = self.model.common_pass(Tensor(dataset.dataset.dataset.X).to(self.device))
+            print(f'calculating GMM densities using \u03C6={self.phi.shape}, \u03BC={self.mu.shape}, \u03A3={self.Sigma.shape}')
+            scores = self.GMM_density_estimate(test_set_coding.cpu().numpy(), self.phi, self.mu, self.Sigma, self.model.L)
+            y_true = dataset.dataset.dataset.y
+
+            # for row in dataset:
+            #     X, y = row
+            #     X = X.to(self.device).float()
+            #
+            #     score = self.score(X)
+            #
+            #     y_true.extend(y.cpu().tolist())
+            #     scores.extend(score.cpu().tolist())
+
+        return y_true, np.array(scores)
 
     def forward(self, X_1: Tensor, X_2: Tensor, Z_1: Tensor, Z_2: Tensor, metric_labels: Tensor):
         com_meta_tup, err_meta_tup, gmm_meta_tup, dot_met, ex_meta_tup, rec_meta_tup = self.model(X_1, X_2, Z_1, Z_2)

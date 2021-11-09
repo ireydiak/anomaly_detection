@@ -6,6 +6,10 @@ from torch import nn
 
 class BaseModel(nn.Module):
 
+    def __init__(self, device='cuda'):
+        super().__init__()
+        self.device = device
+
     def reset(self):
         self.apply(self.weight_reset)
 

@@ -85,7 +85,7 @@ class MLAD(BaseModel):
         L: Size of latent space (dimensionality of latent space)
         K: Number of gaussian mixtures
         """
-        super(MLAD, self).__init__()
+        super(MLAD, self).__init__(**kwargs)
         # Common network
         self.common_net = create_network([
             (D, 64, nn.ReLU()),
@@ -144,7 +144,7 @@ class MLAD(BaseModel):
             ((L, 16, nn.ReLU()), (16, 16, nn.ReLU()), (16, K, nn.Softmax(dim=1))),
             ((K, 16, nn.ReLU()), (16, 16, nn.ReLU()), (16, L, nn.Sigmoid()))
         ])
-        self.gmm_enc_net = AutoEncoder(gmm_net_layers[0], gmm_net_layers[1])
+        self.gmm_net = AutoEncoder(gmm_net_layers[0], gmm_net_layers[1])
         self.lamb_1 = kwargs.get('lambda_1', 1e-04)
         self.lamb_2 = kwargs.get('lambda_2', 1)
         self.lamb_3 = kwargs.get('lambda_3', 1)
@@ -217,7 +217,7 @@ class MLAD(BaseModel):
         # Compute losses
         loss_A = self.lamb_1 * common_loss_A + self.lamb_2 * rec_loss_A + self.lamb_3 * ex_loss_A + gmm_loss_A
         loss_B = self.lamb_1 * common_loss_B + self.lamb_2 * rec_loss_B + self.lamb_3 * ex_loss_B + gmm_loss_B
-        loss_metric = self.lambda_5 * metric_loss
+        loss_metric = self.lamb_5 * metric_loss
         return loss_A + loss_B + loss_metric
 
     def forward_one(self, X: Tensor) -> (float, float, float, float, float):
@@ -262,8 +262,8 @@ class MLAD(BaseModel):
         mix_1 = torch.cat((common_1, err_2), dim=1)
         mix_2 = torch.cat((common_2, err_1), dim=1)
         # Decode
-        rec_1 = self.repr_net(mix_1)
-        rec_2 = self.repr_net(mix_2)
+        rec_1 = self.reconstructor_net(mix_1)
+        rec_2 = self.reconstructor_net(mix_2)
         return (common_1, common_2), (err_1, err_2), (gmm_1, gmm_2), (gmm_z_1, gmm_z_2), (ex_1, ex_2), (rec_1, rec_2)
 
     def forward(self, X_1: Tensor, X_2: Tensor, Z_1: Tensor, Z_2: Tensor) -> Tuple[Tuple, Tuple, Tuple, Tuple, Tuple, Tuple]:
@@ -286,10 +286,10 @@ class MLAD(BaseModel):
         common_tup_1, err_tup_1, gmm_tup_1, gmm_tup_z_1, ex_tup_1, rec_tup_1 = self.forward_two(X_1, X_2)
         common_tup_2, err_tup_2, gmm_tup_2, gmm_tup_z_2, ex_tup_2, rec_tup_2 = self.forward_two(Z_1, Z_2)
         dot_metrics = (
-            (gmm_tup_z_1[0] * gmm_tup_z_2[0]) @ torch.ones(self.K, 1),
-            (gmm_tup_z_1[0] * gmm_tup_z_2[1]) @ torch.ones(self.K, 1),
-            (gmm_tup_z_1[1] * gmm_tup_z_2[0]) @ torch.ones(self.K, 1),
-            (gmm_tup_z_1[1] * gmm_tup_z_2[1]) @ torch.ones(self.K, 1)
+            (gmm_tup_z_1[0] * gmm_tup_z_2[0]) @ torch.ones(self.K, 1).to(self.device),
+            (gmm_tup_z_1[0] * gmm_tup_z_2[1]) @ torch.ones(self.K, 1).to(self.device),
+            (gmm_tup_z_1[1] * gmm_tup_z_2[0]) @ torch.ones(self.K, 1).to(self.device),
+            (gmm_tup_z_1[1] * gmm_tup_z_2[1]) @ torch.ones(self.K, 1).to(self.device)
         )
 
         return (common_tup_1, common_tup_2), \

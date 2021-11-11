@@ -84,6 +84,8 @@ class Experiment:
                  batch_size: int, model_param=None, seed=None):
         if model_param is None:
             self.model_param = {}
+        else:
+            self.model_param = {}
         if os.path.exists(path_to_dataset):
             self.path_to_dataset = path_to_dataset
         else:
@@ -100,7 +102,6 @@ class Experiment:
         self.batch_size = batch_size
         self.seed = seed
         self.n_runs = n_runs
-        self.model_param = model_param
 
     def get_params(self):
         return {

@@ -1,14 +1,15 @@
 from collections import defaultdict
 from datetime import datetime as dt
-from typing import List
+from typing import List, NamedTuple
 import numpy as np
 import pandas as pd
 import os
 from src.datamanager.dataset import *
 from src.trainers.DeepSVDDTrainer import DeepSVDDTrainer
 from src.trainers.MemAETrainer import MemAETrainer
+from src.trainers.AutoEncoder import DAGMMTrainer
 from src.models.OneClass import DeepSVDD
-from src.models.AutoEncoder import MemAE
+from src.models.AutoEncoder import MemAE, DAGMM
 import neptune.new as neptune
 from dotenv import dotenv_values
 
@@ -18,8 +19,7 @@ def resolve_dataset(dataset_name: str, path_to_dataset: str, pct: float) -> Abst
     return clsname(path_to_dataset, pct)
 
 
-def store_results(results: dict, params: dict, model_name: str, dataset: str, path: str, start_time: dt,
-                  output_path: str = None):
+def store_results(results: dict, params: dict, model_name: str, dataset: str, path: str, start_time: dt, output_path: str = None):
     output_dir = output_path if output_path else f'./results/{dataset}'
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
@@ -60,11 +60,16 @@ def resolve_model_trainer(model_name: str, params: dict):
             D=params['D'], rep_dim=params.get('rep_dim', 1), mem_dim=params.get('mem_dim', 50), device=params['device']
         )
         trainer = MemAETrainer(model=model, alpha=params['alpha'], n_epochs=params['epochs'])
+    elif model_name == 'DAGMM':
+        model = DAGMM(
+            D=params['D'], L=params.get('L', 1), K=params.get('K', 4), device=params['device']
+        )
+        trainer = DAGMMTrainer(model=model, device=params['device'], n_epochs=params['epochs'])
     return model, trainer
 
 
 def load_neptune(mode: str, tags: list) -> neptune.Run:
-    cfg = dotenv_values("../.env")
+    cfg = dotenv_values()
     return neptune.init(
         project=cfg["neptune_project"],
         api_token=cfg["neptune_api_token"],
@@ -95,6 +100,7 @@ class Experiment:
         self.batch_size = batch_size
         self.seed = seed
         self.n_runs = n_runs
+        self.model_param = model_param
 
     def get_params(self):
         return {
@@ -169,10 +175,8 @@ class BatchTrainer:
             res[key] = "%2.4f (%2.4f)" % (vals.mean(), vals.std())
             # (neptune) store final metrics
             run["training/evaluation/" + key] = res[key]
-
         store_results(
-            all_params, res, model.print_name(), exp.dataset, exp.path_to_dataset, training_start_time, exp.export_path
+            res, all_params, exp.model, exp.dataset, exp.path_to_dataset, training_start_time, exp.export_path
         )
         # store_model(model, export_path)
         run.stop()
-

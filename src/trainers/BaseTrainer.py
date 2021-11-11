@@ -32,7 +32,7 @@ class BaseTrainer(ABC):
         """
         Perform any action after training is done
         """
-        print("Finished training")
+        pass
 
     def before_training(self, dataset: DataLoader):
         """

@@ -174,33 +174,39 @@ class DAGMMTrainer(BaseTrainer):
         gamma_sum = torch.sum(gamma, dim=0)
         phi = gamma_sum / N
 
+        # phi = torch.mean(gamma, dim=0)
+
         # K x D
         # :math: `\mu = (I * gamma_sum)^{-1} * (\gamma^T * z)`
         mu = torch.sum(gamma.unsqueeze(-1) * z.unsqueeze(1), dim=0) / gamma_sum.unsqueeze(-1)
         # mu = torch.linalg.inv(torch.diag(gamma_sum)) @ (gamma.T @ z)
-
-        # Covariance (K x D x D)
-        covs = []
-        for i in range(0, K):
-            xm = z - mu[i]
-            cov = 1 / gamma_sum[i] * ((gamma[:, i].unsqueeze(-1) * xm).T @ xm)
-            cov += 1e-12
-            covs.append(cov)
 
         mu_z = z.unsqueeze(1) - mu.unsqueeze(0)
         cov_mat = mu_z.unsqueeze(-1) @ mu_z.unsqueeze(-2)
         cov_mat = gamma.unsqueeze(-1).unsqueeze(-1) * cov_mat
         cov_mat = torch.sum(cov_mat, dim=0) / gamma_sum.unsqueeze(-1).unsqueeze(-1)
 
+        # ==============
+        K, N, D = gamma.shape[1], z.shape[0], z.shape[1]
+        # (K,)
+        gamma_sum = torch.sum(gamma, dim=0)
+        # prob de x_i pour chaque cluster k
+        phi_ = gamma_sum / N
+
+        # K x D
+        # :math: `\mu = (I * gamma_sum)^{-1} * (\gamma^T * z)`
+        mu_ = torch.sum(gamma.unsqueeze(-1) * z.unsqueeze(1), dim=0) / gamma_sum.unsqueeze(-1)
+        # Covariance (K x D x D)
+
         self.phi = phi.data
         self.mu = mu.data
         self.cov_mat = cov_mat
-        self.covs = covs
+        # self.covs = covs
         # self.cov_mat = covs
 
         return phi, mu, cov_mat
 
-    def estimate_sample_energy(self, z, phi=None, mu=None, cov_mat=None, average_energy=True):
+    def estimate_sample_energy(self, z, phi=None, mu=None, cov_mat=None, average_energy=True, eps=1e-12):
         if phi is None:
             phi = self.phi
         if mu is None:
@@ -210,13 +216,13 @@ class DAGMMTrainer(BaseTrainer):
 
         # Avoid non-invertible covariance matrix by adding small values (eps)
         d = z.shape[1]
-        eps = 1e-12
         cov_mat = cov_mat + (torch.eye(d)).to(self.device) * eps
         # N x K x D
         mu_z = z.unsqueeze(1) - mu.unsqueeze(0)
 
         # scaler
-        inv_cov_mat = torch.linalg.inv(cov_mat)
+        inv_cov_mat = torch.cholesky_inverse(torch.cholesky(cov_mat))
+        # inv_cov_mat = torch.linalg.inv(cov_mat)
         det_cov_mat = torch.linalg.cholesky(2 * np.pi * cov_mat)
         det_cov_mat = torch.diagonal(det_cov_mat, dim1=1, dim2=2)
         det_cov_mat = torch.prod(det_cov_mat, dim=1)

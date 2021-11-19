@@ -3,7 +3,7 @@ import torch
 from src.exp import BatchTrainer, Experiment
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-m', '--model', help='The selected model', choices=['DeepSVDD', 'MemAE', 'DAGMM'], type=str)
+parser.add_argument('-m', '--model', help='The selected model', choices=['DeepSVDD', 'MemAE', 'DAGMM', 'DSEBM-e', 'DSEBM-r'], type=str)
 parser.add_argument('-d', '--dataset', help='The selected dataset',
                     choices=['KDD10', 'NSLKDD', 'USBIDS', 'Arrhythmia', 'IDS2017'], type=str)
 parser.add_argument('-b', '--batch-size', help='Size of mini-batch', default=128, type=int)

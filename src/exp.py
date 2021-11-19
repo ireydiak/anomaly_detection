@@ -8,8 +8,10 @@ from src.datamanager.dataset import *
 from src.trainers.DeepSVDDTrainer import DeepSVDDTrainer
 from src.trainers.MemAETrainer import MemAETrainer
 from src.trainers.AutoEncoder import DAGMMTrainer
+from src.trainers.EnergyTrainer import DSEBMTrainer
 from src.models.OneClass import DeepSVDD
 from src.models.AutoEncoder import MemAE, DAGMM
+from src.models.Energy import DSEBM
 import neptune.new as neptune
 from dotenv import dotenv_values
 
@@ -59,12 +61,33 @@ def resolve_model_trainer(model_name: str, params: dict):
         model = MemAE(
             D=params['D'], rep_dim=params.get('rep_dim', 1), mem_dim=params.get('mem_dim', 50), device=params['device']
         )
-        trainer = MemAETrainer(model=model, alpha=params['alpha'], n_epochs=params['epochs'])
+        trainer = MemAETrainer(
+            model=model, alpha=params['alpha'], n_epochs=params['epochs'], batch_size=params['batch_size']
+        )
     elif model_name == 'DAGMM':
         model = DAGMM(
             D=params['D'], L=params.get('L', 1), K=params.get('K', 4), device=params['device']
         )
-        trainer = DAGMMTrainer(model=model, device=params['device'], n_epochs=params['epochs'])
+        trainer = DAGMMTrainer(
+            model=model, device=params['device'], n_epochs=params['epochs'], batch_size=params['batch_size']
+        )
+    elif model_name == 'DSEBM-e':
+        model = DSEBM(
+            D=params['D']
+        )
+        trainer = DSEBMTrainer(
+            model=model, D=params['D'], score='e', device=params['device'], n_epochs=params['epochs'],
+            batch_size=params['batch_size']
+        )
+    elif model_name == 'DSEBM-r':
+        model = DSEBM(
+            D=params['D']
+        )
+        trainer = DSEBMTrainer(
+            model=model, D=params['D'], score='r', device=params['device'], n_epochs=params['epochs'],
+            batch_size=params['batch_size']
+        )
+
     return model, trainer
 
 
@@ -138,7 +161,8 @@ class BatchTrainer:
         ds = resolve_dataset(exp.dataset, exp.path_to_dataset, exp.pct)
         # TODO: load params from exp
         model, trainer = resolve_model_trainer(
-            exp.model, {'D': ds.D(), 'alpha': 2e-4, 'device': exp.device, 'epochs': exp.epochs}
+            exp.model,
+            {'D': ds.D(), 'alpha': 2e-4, 'device': exp.device, 'epochs': exp.epochs, 'batch_size': exp.batch_size}
         )
         train_ldr, test_ldr = ds.loaders(batch_size=exp.batch_size, seed=exp.seed)
 

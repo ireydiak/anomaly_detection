@@ -4,7 +4,6 @@ from sklearn import metrics
 import numpy as np
 from torch.utils.data.dataloader import DataLoader
 from torch import optim
-from tqdm import trange
 import torch
 import neptune.new as neptune
 
@@ -40,36 +39,43 @@ class BaseTrainer(ABC):
         """
         pass
 
+    def set_optimizer(self):
+        return optim.Adam(self.model.parameters(), lr=self.lr)
+
     def train(self, dataset: DataLoader, nep: neptune.Run = None):
         self.model.train()
-        optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
 
         self.before_training(dataset)
+
+        optimizer = self.set_optimizer()
 
         print('Started training')
         for epoch in range(self.n_epochs):
             epoch_loss = 0.0
-            print(f"\nEpoch: {epoch + 1} of {self.n_epochs}")
-            with trange(len(dataset)) as t:
-                for sample in dataset:
-                    X, _ = sample
-                    X = X.to(self.device).float()
+            #print(f"\nEpoch: {epoch + 1} of {self.n_epochs}")
+            #with trange(len(dataset)) as t:
+            for sample in dataset:
+                X, _ = sample
+                X = X.to(self.device).float()
 
-                    # Reset gradient
-                    optimizer.zero_grad()
+                if len(X) < self.batch_size:
+                    break
 
-                    loss = self.train_iter(X)
-                    if nep:
-                        nep["training/metrics/batch/loss"] = loss
-                    # Backpropagation
-                    loss.backward()
-                    optimizer.step()
+                # Reset gradient
+                optimizer.zero_grad()
 
-                    epoch_loss += loss
-                t.set_postfix(
-                    loss='{:05.3f}'.format(epoch_loss),
-                )
-                t.update()
+                loss = self.train_iter(X)
+                if nep:
+                    nep["training/metrics/batch/loss"] = loss
+                # Backpropagation
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss
+                # t.set_postfix(
+                #     loss='{:05.3f}'.format(epoch_loss),
+                # )
+                # t.update()
         self.after_training()
 
     def test(self, dataset: DataLoader) -> Union[np.array, np.array]:
@@ -79,6 +85,9 @@ class BaseTrainer(ABC):
             for row in dataset:
                 X, y = row
                 X = X.to(self.device).float()
+
+                if len(X) < self.batch_size:
+                    break
 
                 score = self.score(X)
 
@@ -91,11 +100,14 @@ class BaseTrainer(ABC):
         return {"learning_rate": self.lr, "epochs": self.n_epochs, "batch_size": self.batch_size,
                 **self.model.get_params()}
 
-    def evaluate(self, y_true: np.array, scores: np.array, pos_label: int = 1, threshold: int = 80) -> dict:
+    def predict(self, scores, thresh):
+        return (scores >= thresh).astype(int)
+
+    def evaluate(self, y_true: np.array, scores: np.array, threshold, pos_label: int = 1) -> dict:
         res = {"Precision": -1, "Recall": -1, "F1-Score": -1, "AUROC": -1, "AUPR": -1}
 
         thresh = np.percentile(scores, threshold)
-        y_pred = (scores >= thresh).astype(int)
+        y_pred = self.predict(scores, thresh)
         res["Precision"], res["Recall"], res["F1-Score"], _ = metrics.precision_recall_fscore_support(
             y_true, y_pred, average='binary', pos_label=pos_label
         )

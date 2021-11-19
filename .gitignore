@@ -5,3 +5,4 @@ catboost_info/
 __pycache__
 .env
 .neptune
+.ipynb_checkpoints

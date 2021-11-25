@@ -103,7 +103,7 @@ class DSEBMTrainer(BaseTrainer):
 
         return score
 
-    def predict(self, scores, thresh):
+    def predict(self, scores: np.array, thresh: float):
         return (scores < thresh).astype(int)
 
     def energy(self, X, X_hat):

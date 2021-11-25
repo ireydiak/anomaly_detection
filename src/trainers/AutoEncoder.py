@@ -254,3 +254,18 @@ class DAGMMTrainer(BaseTrainer):
 
     def score(self, sample: torch.Tensor):
         pass
+
+
+class NeuTralADTrainer(BaseTrainer):
+
+    def __init__(self, **kwargs):
+        super(NeuTralADTrainer, self).__init__(**kwargs)
+        self.temperature = self.model.temperature
+        self.K = self.model.K
+        self.N = self.model.N
+
+    def score(self, sample: torch.Tensor):
+        return self.model.score(sample)
+
+    def train_iter(self, sample: torch.Tensor):
+        return self.model(sample)

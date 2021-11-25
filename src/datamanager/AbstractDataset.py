@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, Subset
 from torch.utils.data.dataset import T_co
 from typing import Tuple
 from torch.utils.data import DataLoader
+import scipy.io as scio
 
 
 class AbstractDataset(Dataset):
@@ -37,6 +38,7 @@ class AbstractDataset(Dataset):
 
         self.anomaly_ratio = (X[:, -1] == anomaly_label).sum() / len(X)
         self.N = len(self.X)
+        self.D = self.X.shape[1]
 
     def __len__(self):
         return len(self.X)
@@ -47,6 +49,9 @@ class AbstractDataset(Dataset):
     def load_data(self, path: str):
         if path.endswith(".npz"):
             return np.load(path)[self.npz_key()]
+        elif path.endswith(".mat"):
+            data = scio.loadmat(path)
+            return np.hstack((data['X'], data['y']))
         else:
             raise RuntimeError(f"Could not open {path}. This dataset can only read .npz files.")
 

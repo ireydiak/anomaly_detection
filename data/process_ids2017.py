@@ -24,7 +24,6 @@ COLS_TO_DROP = [
     'Timestamp',
 ]
 
-
 COLS = [
     'Dst Port',
     'Tot Fwd Pkts',
@@ -94,12 +93,14 @@ COLS = [
     'Idle Min'
 ]
 
+
 def drop_uniq_cols(df: pd.DataFrame):
     uniq_cols = df.columns[df.nunique() == 1]
     df.drop(columns=uniq_cols)
     return df, list(map(lambda col: col, df.columns[uniq_cols]))
 
-def clean_step(path_to_file: str, nan_thresh: float=0.1, negative_thresh: float=0.1) -> (pd.DataFrame, dict):
+
+def clean_step(path_to_file: str, nan_thresh: float = 0.1, negative_thresh: float = 0.1) -> (pd.DataFrame, dict):
     total_rows, deleted_rows, deleted_features = 0, 0, len(COLS_TO_DROP)
     chunks, n_features = [], []
     stats = defaultdict()
@@ -119,7 +120,7 @@ def clean_step(path_to_file: str, nan_thresh: float=0.1, negative_thresh: float=
     deleted_features += len(uniq_cols)
     stats["uniq_cols"] = '; '.join(list(uniq_cols))
     print("Dropped {}".format(', '.join(uniq_cols)))
-    
+
     # Drop rows with NaN or invalid (INF) values
     # If the number of rows is greater than nan_thresh, then we remove the feature instead.
     print("Filtering NaN/INF values...")
@@ -227,7 +228,7 @@ if __name__ == '__main__':
     df, clean_stats = clean_step(path)
     # Save info about cleaning step
     utils.save_stats(export_path + '/{}_info.csv'.format(dataset_name), clean_stats)
-    
+
     cols = list(df.columns)
     # 2 - Normalize numerical values and treat categorical values
     to_process = [

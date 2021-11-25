@@ -6,6 +6,7 @@ from torch.utils.data.dataloader import DataLoader
 from torch import optim
 import torch
 import neptune.new as neptune
+from tqdm import trange
 
 
 class BaseTrainer(ABC):
@@ -52,30 +53,30 @@ class BaseTrainer(ABC):
         print('Started training')
         for epoch in range(self.n_epochs):
             epoch_loss = 0.0
-            #print(f"\nEpoch: {epoch + 1} of {self.n_epochs}")
-            #with trange(len(dataset)) as t:
-            for sample in dataset:
-                X, _ = sample
-                X = X.to(self.device).float()
+            print(f"\nEpoch: {epoch + 1} of {self.n_epochs}")
+            with trange(len(dataset)) as t:
+                for sample in dataset:
+                    X, _ = sample
+                    X = X.to(self.device).float()
 
-                if len(X) < self.batch_size:
-                    break
+                    if len(X) < self.batch_size:
+                        break
 
-                # Reset gradient
-                optimizer.zero_grad()
+                    # Reset gradient
+                    optimizer.zero_grad()
 
-                loss = self.train_iter(X)
-                if nep:
-                    nep["training/metrics/batch/loss"] = loss
-                # Backpropagation
-                loss.backward()
-                optimizer.step()
+                    loss = self.train_iter(X)
+                    if nep:
+                        nep["training/metrics/batch/loss"] = loss
+                    # Backpropagation
+                    loss.backward()
+                    optimizer.step()
 
-                epoch_loss += loss
-                # t.set_postfix(
-                #     loss='{:05.3f}'.format(epoch_loss),
-                # )
-                # t.update()
+                    epoch_loss += loss.item()
+                    t.set_postfix(
+                        loss='{:05.3f}'.format(epoch_loss),
+                    )
+                    t.update()
         self.after_training()
 
     def test(self, dataset: DataLoader) -> Union[np.array, np.array]:
@@ -100,7 +101,7 @@ class BaseTrainer(ABC):
         return {"learning_rate": self.lr, "epochs": self.n_epochs, "batch_size": self.batch_size,
                 **self.model.get_params()}
 
-    def predict(self, scores, thresh):
+    def predict(self, scores: np.array, thresh: float):
         return (scores >= thresh).astype(int)
 
     def evaluate(self, y_true: np.array, scores: np.array, threshold, pos_label: int = 1) -> dict:

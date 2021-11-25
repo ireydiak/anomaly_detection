@@ -1,16 +1,16 @@
 from collections import defaultdict
 from datetime import datetime as dt
-from typing import List, NamedTuple
+from typing import List
 import numpy as np
 import pandas as pd
 import os
 from src.datamanager.dataset import *
 from src.trainers.DeepSVDDTrainer import DeepSVDDTrainer
 from src.trainers.MemAETrainer import MemAETrainer
-from src.trainers.AutoEncoder import DAGMMTrainer
+from src.trainers.AutoEncoder import DAGMMTrainer, NeuTralADTrainer
 from src.trainers.EnergyTrainer import DSEBMTrainer
 from src.models.OneClass import DeepSVDD
-from src.models.AutoEncoder import MemAE, DAGMM
+from src.models.AutoEncoder import MemAE, DAGMM, NeuTralAD
 from src.models.Energy import DSEBM
 import neptune.new as neptune
 from dotenv import dotenv_values
@@ -52,7 +52,7 @@ def store_model(model, export_path: str):
     model.save(obj=model.state_dict(), f=f)
 
 
-def resolve_model_trainer(model_name: str, params: dict):
+def resolve_model_trainer(model_name: str, params: dict, dataset: str):
     model, trainer = None, None
     if model_name == 'DeepSVDD':
         model = DeepSVDD(params['D'], device=params['device'])
@@ -86,6 +86,18 @@ def resolve_model_trainer(model_name: str, params: dict):
         trainer = DSEBMTrainer(
             model=model, D=params['D'], score='r', device=params['device'], n_epochs=params['epochs'],
             batch_size=params['batch_size']
+        )
+    elif model_name == 'NeuTralAD':
+        model = NeuTralAD(
+            D=params['D'],
+            N=params['N'],
+            dataset=dataset,
+            n_layers=params.get('n_layers', 3),
+            temperature=params.get('temperature', 1.0),
+        )
+        trainer = NeuTralADTrainer(
+            model=model,
+            device=params['device'], n_epochs=params['epochs'], batch_size=params['batch_size']
         )
 
     return model, trainer
@@ -162,7 +174,8 @@ class BatchTrainer:
         # TODO: load params from exp
         model, trainer = resolve_model_trainer(
             exp.model,
-            {'D': ds.D(), 'alpha': 2e-4, 'device': exp.device, 'epochs': exp.epochs, 'batch_size': exp.batch_size}
+            {'D': ds.D, 'N': ds.N, 'alpha': 2e-4, 'device': exp.device, 'epochs': exp.epochs, 'batch_size': exp.batch_size},
+            exp.dataset
         )
         train_ldr, test_ldr = ds.loaders(batch_size=exp.batch_size, seed=exp.seed)
 

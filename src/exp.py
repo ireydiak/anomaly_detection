@@ -9,9 +9,9 @@ from src.trainers.DeepSVDDTrainer import DeepSVDDTrainer
 from src.trainers.MemAETrainer import MemAETrainer
 from src.trainers.AutoEncoder import DAGMMTrainer, NeuTralADTrainer
 from src.trainers.EnergyTrainer import DSEBMTrainer
-from src.models.OneClass import DeepSVDD
-from src.models.AutoEncoder import MemAE, DAGMM, NeuTralAD
-from src.models.Energy import DSEBM
+from src.tabular.OneClass import DeepSVDD
+from src.tabular.AutoEncoder import MemAE, DAGMM, NeuTralAD
+from src.tabular.Energy import DSEBM
 import neptune.new as neptune
 from dotenv import dotenv_values
 
@@ -174,7 +174,7 @@ class BatchTrainer:
         # TODO: load params from exp
         model, trainer = resolve_model_trainer(
             exp.model,
-            {'D': ds.D, 'N': ds.N, 'alpha': 2e-4, 'device': exp.device, 'epochs': exp.epochs, 'batch_size': exp.batch_size, 'temperature': 0.07},
+            {'D': ds.D, 'N': ds.N, 'alpha': 2e-4, 'device': exp.device, 'epochs': exp.epochs, 'batch_size': exp.batch_size, 'temperature': 0.07, 'mem_dim': 2000},
             exp.dataset
         )
         train_ldr, test_ldr = ds.loaders(batch_size=exp.batch_size, seed=exp.seed)

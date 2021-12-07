@@ -6,3 +6,5 @@ __pycache__
 .env
 .neptune
 .ipynb_checkpoints
+data/*.gz
+data/*py

@@ -174,7 +174,7 @@ class BatchTrainer:
         # TODO: load params from exp
         model, trainer = resolve_model_trainer(
             exp.model,
-            {'D': ds.D, 'N': ds.N, 'alpha': 2e-4, 'device': exp.device, 'epochs': exp.epochs, 'batch_size': exp.batch_size, 'temperature': 0.07, 'mem_dim': 2000},
+            {'D': ds.D, 'N': ds.N, 'alpha': 2e-4, 'device': exp.device, 'epochs': exp.epochs, 'batch_size': exp.batch_size, 'temperature': 0.07, 'mem_dim': 500},
             exp.dataset
         )
         train_ldr, test_ldr = ds.loaders(batch_size=exp.batch_size, seed=exp.seed)

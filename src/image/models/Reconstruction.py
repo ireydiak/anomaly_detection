@@ -2,7 +2,7 @@ from src.image import BaseModel
 import torch.nn as nn
 import torch
 
-from src.image.MemoryModule import MemoryModule
+from src.image.models.MemoryModule import MemoryModule
 
 
 class MemAE(BaseModel):

@@ -1,2 +1,2 @@
-from .BaseModel import BaseModel
-from .MemoryModule import MemoryModule
+from . import models
+from . import trainers

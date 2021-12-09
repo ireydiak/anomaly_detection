@@ -1,6 +1,6 @@
 from torch.nn import Parameter
 from torch.nn.modules.activation import Softplus
-from . import BaseModel
+from src.tabular.models import BaseModel
 import torch.nn as nn
 from torch import Tensor
 import torch

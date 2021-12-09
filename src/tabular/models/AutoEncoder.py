@@ -1,6 +1,6 @@
 from torch import nn
-from . import MemoryUnit
-from . import BaseModel
+from .BaseModel import BaseModel
+from .MemoryModule import MemoryUnit
 import torch
 import numpy as np
 from pytorch_metric_learning import distances

@@ -7,4 +7,4 @@ __pycache__
 .neptune
 .ipynb_checkpoints
 data/*.gz
-data/*py
+data/**/*.csv

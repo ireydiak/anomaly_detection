@@ -53,7 +53,6 @@ class BaseTrainer(ABC):
         print('Started training')
         for epoch in range(self.n_epochs):
             epoch_loss = 0.0
-            print(f"\nEpoch: {epoch + 1} of {self.n_epochs}")
             with trange(len(dataset)) as t:
                 for sample in dataset:
                     X, _ = sample
@@ -75,6 +74,7 @@ class BaseTrainer(ABC):
                     epoch_loss += loss.item()
                     t.set_postfix(
                         loss='{:05.3f}'.format(epoch_loss),
+                        epoch=epoch+1
                     )
                     t.update()
         self.after_training()
@@ -98,8 +98,12 @@ class BaseTrainer(ABC):
         return np.array(y_true), np.array(scores)
 
     def get_params(self) -> dict:
-        return {"learning_rate": self.lr, "epochs": self.n_epochs, "batch_size": self.batch_size,
-                **self.model.get_params()}
+        return {
+            "learning_rate": self.lr,
+            "epochs": self.n_epochs,
+            "batch_size": self.batch_size,
+            **self.model.get_params()
+        }
 
     def predict(self, scores: np.array, thresh: float):
         return (scores >= thresh).astype(int)

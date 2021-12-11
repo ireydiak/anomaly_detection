@@ -5,13 +5,13 @@ import numpy as np
 import pandas as pd
 import os
 from src.datamanager.dataset import *
-from src.trainers.DeepSVDDTrainer import DeepSVDDTrainer
-from src.trainers.MemAETrainer import MemAETrainer
-from src.trainers.AutoEncoder import DAGMMTrainer, NeuTralADTrainer
-from src.trainers.EnergyTrainer import DSEBMTrainer
-from src.tabular.OneClass import DeepSVDD
-from src.tabular.AutoEncoder import MemAE, DAGMM, NeuTralAD
-from src.tabular.Energy import DSEBM
+from src.tabular.trainers import DeepSVDDTrainer
+from src.tabular.trainers import MemAETrainer
+from src.tabular.trainers.AutoEncoder import DAGMMTrainer, NeuTralADTrainer
+from src.tabular.trainers.EnergyTrainer import DSEBMTrainer
+from src.tabular.models.OneClass import DeepSVDD
+from src.tabular import MemAE, DAGMM, NeuTralAD
+from src.tabular import DSEBM
 import neptune.new as neptune
 from dotenv import dotenv_values
 

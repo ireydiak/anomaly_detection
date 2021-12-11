@@ -3,10 +3,9 @@ from collections import defaultdict
 
 import torch
 
-from src.datamanager.image import CIFAR10Manager
-from src.exp import BatchTrainer, Experiment
-from src.image.models import ALAD, DeepSVDD
-from src.image.trainers import ALADTrainer, DeepSVDDTrainer
+from src.datamanager import IEEFraudDetection
+from src.tabular.models import DeepSVDD
+from src.tabular.trainers import DeepSVDDTrainer
 import numpy as np
 from datetime import datetime as dt
 
@@ -118,17 +117,25 @@ if __name__ == '__main__':
     # trainer.train()
     # Setting up the model, trainer and their respective parameters
     n_epochs = 200
-    batch_size = 32
-    latent_dim = 32
+    batch_size = 64
     lr = 1e-4
     device = 'cuda'
     seed = 42
     n_runs = 1
-    normal_class = 'cat'
+    normal_class = 0
 
-    ds = CIFAR10Manager(root='./data', normal_class=normal_class)
-    model = ALAD(feature_dim=3, latent_dim=latent_dim)
-    trainer = ALADTrainer(model=model, n_epochs=n_epochs, batch_size=batch_size, lr=lr, device='cuda')
+    train_ds = IEEFraudDetection(
+        root='C:/Users/verdi/Documents/Datasets/IEEE-CIS_Fraud_Detection/processed/clean/train_transaction_clean.csv',
+        train=True,
+        normal_class=normal_class
+    )
+    test_ds = IEEFraudDetection(
+        root='C:/Users/verdi/Documents/Datasets/IEEE-CIS_Fraud_Detection/processed/clean/test_transaction_clean.csv',
+        train=False,
+        normal_class=None
+    )
+    model = DeepSVDD(train_ds.num_features)
+    trainer = DeepSVDDTrainer(model=model, n_epochs=n_epochs, batch_size=batch_size, lr=lr, device='cuda')
 
     # Training
     # (neptune) initialize neptune
@@ -138,7 +145,7 @@ if __name__ == '__main__':
     # ds = resolve_dataset(exp.dataset, exp.path_to_dataset, exp.pct)
     # TODO: load params from exp
 
-    train_ldr, test_ldr = ds.loaders(batch_size=batch_size, seed=seed)
+    train_ldr, test_ldr = train_ds.loaders(batch_size=batch_size, seed=seed), test_ds.loaders(batch_size=batch_size, seed=seed)
 
     # (neptune) log datasets sizes
     # run["data/train/size"] = len(train_ldr)
@@ -146,7 +153,7 @@ if __name__ == '__main__':
 
     # (neptune) set parameters to be uploaded
     # tau = exp.tau or int(np.ceil((1 - ds.anomaly_ratio) * 100))
-    tau = int(np.ceil((1 - ds.anomaly_ratio) * 100))
+    tau = int(np.ceil((1 - train_ds.anomaly_ratio) * 100))
     # all_params = {
     #     "N": ds.N,
     #     "runs": n_runs,
@@ -157,7 +164,7 @@ if __name__ == '__main__':
     # run["parameters"] = all_params
 
     training_start_time = dt.now()
-    print("Training %s with shape %s, anomaly ratio %1.4f" % ("DeepSVDD", ds.shape, ds.anomaly_ratio))
+    print("Training %s with shape %s, anomaly ratio %1.4f" % ("DeepSVDD", train_ds.shape, train_ds.anomaly_ratio))
     P, R, FS, ROC, PR = [], [], [], [], []
     for i in range(n_runs):
         print(f"Run {i + 1}/{n_runs}")

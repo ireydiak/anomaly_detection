@@ -3,21 +3,22 @@ from .BaseModel import BaseModel
 from .MemoryModule import MemoryUnit
 import torch
 import numpy as np
-from pytorch_metric_learning import distances
+import torch.nn.functional as F
+from ...utils import weights_init_xavier
 
 
 class MemAE(BaseModel):
 
     def __init__(self, D: int, mem_dim: int = 50, rep_dim: int = 1, device='cuda'):
         super(MemAE, self).__init__()
-        self.D = D
+        self.in_features = D
         self.mem_dim = mem_dim
         self.device = device
         self.rep_dim = rep_dim
         self._build_net()
 
     def _build_net(self):
-        D, L = self.D, self.rep_dim
+        D, L = self.in_features, self.rep_dim
         self.enc = nn.Sequential(
             nn.Linear(D, D // 2),
             nn.Tanh(),
@@ -46,7 +47,7 @@ class MemAE(BaseModel):
     def get_params(self) -> dict:
         return {
             'rep_dim': self.rep_dim,
-            'D': self.D
+            'D': self.in_features
         }
 
 
@@ -57,13 +58,13 @@ class DAGMM(BaseModel):
     Simply put, it's an end-to-end trained auto-encoder network complemented by a distinct gaussian mixture network.
     """
 
-    def __init__(self, D: int, L: int, K: int, device='cuda'):
+    def __init__(self, in_features: int, latent_dim: int, K: int, device='cuda'):
         """
         DAGMM constructor
 
         Parameters
         ----------
-        D: int
+        in_features: int
             input dimension
         L: int
             latent dimension
@@ -73,8 +74,8 @@ class DAGMM(BaseModel):
             'cuda' or 'cpu'
         """
         super(DAGMM, self).__init__()
-        self.L = L
-        self.D = D
+        self.latent_dim = latent_dim
+        self.in_features = in_features
         # defaults to parameters described in section 4.3 of the paper
         # https://sites.cs.ucsb.edu/~bzong/doc/iclr18-dagmm.pdf.
         # if not ae_layers:
@@ -101,7 +102,7 @@ class DAGMM(BaseModel):
         return 'DAGMM'
 
     def _build_net(self):
-        D, L, K = self.D, self.L, self.K
+        D, L, K = self.in_features, self.latent_dim, self.K
         self.enc = nn.Sequential(
             nn.Linear(D, D // 2),
             nn.Tanh(),
@@ -154,101 +155,129 @@ class DAGMM(BaseModel):
 
     def get_params(self) -> dict:
         return {
-            "L": self.L,
-            "K": self.K
+            "latent_dim": self.latent_dim,
+            "num_mixtures": self.K
         }
 
 
-class NeuTralAD(BaseModel):
-
-    def __init__(self, D: int, N: int, dataset: str, device='cuda', n_layers: int = 3, temperature: float = 1.0):
-        super(NeuTralAD, self).__init__()
-        self.D = D
-        self.N = N
-        self.K, self.Z = self._resolve_params(dataset)
-        self.temperature = temperature # TODO: try 0.07
-        self.n_layers = n_layers
+class NeuTraAD(BaseModel):
+    def __init__(self, in_features: int, temperature: float, dataset: str, n_layers=3, device='cuda', **kwargs):
+        super(NeuTraAD, self).__init__()
         self.device = device
-        self.masks = []
-        self.enc = None
+        self.in_features = in_features
+        self.latent_dim = in_features // 2
+        self.n_layers = n_layers
+        self.dataset = dataset
+        self.K, self.Z, self.emb_out_dims = self._resolve_params(dataset)
+        self.temperature = temperature
+        self.cosim = nn.CosineSimilarity()
         self._build_network()
+        self.enc.apply(weights_init_xavier)
 
-    def __repr__(self):
-        return 'NeuTralAD (D=%d, K=%d, Z=%d)' % (self.D, self.K, self.Z)
-
-    def _build_network(self):
-        # Encoder
-        out_dims = np.linspace(self.D, self.Z, self.n_layers, dtype=np.int32)
-        enc_layers = create_network(self.D, out_dims)
-        self.enc = nn.Sequential(*enc_layers).to(self.device)
-        # Masks / Transformations
-        self.masks = self._create_masks()
+    def print_name(self):
+        return 'neuTraAD'
 
     def _create_masks(self) -> list:
-        masks = [0] * self.K
-        out_dims = [self.D] * self.n_layers
+        masks = [None] * self.K
+        out_dims = np.array([self.in_features] * self.n_layers)
         for K_i in range(self.K):
-            net_layers = create_network(self.D, out_dims)
+            net_layers = create_network(self.in_features, out_dims, bias=False)
             net_layers[-1] = nn.Sigmoid()
             masks[K_i] = nn.Sequential(*net_layers).to(self.device)
         return masks
 
-    def _resolve_params(self, dataset: str) -> (int, int):
-        K, Z = 7, 32
+    def _build_network(self):
+        # Encoder
+        out_dims = self.emb_out_dims
+        enc_layers = create_network(self.in_features, out_dims)[:-1]  # remove ReLU from the last layer
+        self.enc = nn.Sequential(*enc_layers).to(self.device)
+        # Masks / Transformations
+        self.masks = self._create_masks()
+
+    def _resolve_params(self, dataset: str) -> (int, int, list):
+        K, Z = 7, 32  # num_transformers,
+        out_dims = [90, 70, 50] + [Z]
         if dataset == 'Thyroid':
             Z = 12
             K = 4
+            out_dims = [60, 40] + [Z]
         elif dataset == 'Arrhythmia':
             K = 11
-        else:
-            raise Exception('Unrecognized dataset %s' % dataset)
-        return K, Z
-
-    def score(self, X: torch.Tensor):
-        # TODO: Bottleneck, replace with matrix operations
-        total_sum = []
-        for x in X:
-            x = x.unsqueeze(0)
-            sum_x = []
-            for k in range(self.K):
-                mask = self.masks[k]
-                x_k = mask(x) * x
-                numerator = (h_func(self.enc(x_k), self.enc(x))).squeeze(1) / self.temperature
-                denominator = [(h_func(self.enc(x_k), self.enc(self.masks[j](x) * x)) / self.temperature).squeeze(1) for
-                               j in range(self.K) if j != k]
-                denominator = torch.Tensor(denominator).to(self.device)
-                sum_x.append(
-                    torch.log(numerator / (numerator + denominator.sum()))
-                )
-            total_sum.append(torch.stack(sum_x).sum())
-        return -torch.stack(total_sum)
-
-    def forward(self, X: torch.Tensor):
-        return self.score(X).mean()
+            out_dims = [60, 40] + [Z]
+        elif dataset == 'IEEEFraudDetection':
+            K = 11
+            out_dims = np.linspace(self.in_features, self.latent_dim, self.n_layers, dtype=np.int)
+        return K, Z, out_dims
 
     def get_params(self) -> dict:
         return {
-            'D': self.D,
-            'N': self.N,
-            'K': self.K,
+            'in_features': self.in_features,
+            'num_transformations': self.K,
             'temperature': self.temperature
         }
 
+    def score(self, X: torch.Tensor):
+        Xk = self._computeX_k(X)
+        Xk = Xk.permute((1, 0, 2))
+        Zk = self.enc(Xk)
+        Z = self.enc(X)
+        Hij = self._computeBatchH_ij(Zk)
+        Hx_xk = self._computeBatchH_x_xk(Z, Zk)
 
-def create_network(D: int, out_dims: np.array) -> list:
+        mask_not_k = (~torch.eye(self.K, dtype=torch.bool, device=self.device)).float()
+        numerator = Hx_xk
+        denominator = Hx_xk + (mask_not_k * Hij).sum(dim=2)
+        scores_V = numerator / denominator
+        score_V = (-torch.log(scores_V)).sum(dim=1)
+
+        return score_V
+
+    def _computeH_ij(self, Z):
+        hij = F.cosine_similarity(Z.unsqueeze(1), Z.unsqueeze(0), dim=2)
+        exp_hij = torch.exp(
+            hij / self.temperature
+        )
+        return exp_hij
+
+    def _computeBatchH_ij(self, Z):
+        hij = F.cosine_similarity(Z.unsqueeze(2), Z.unsqueeze(1), dim=3)
+        exp_hij = torch.exp(
+            hij / self.temperature
+        )
+        return exp_hij
+
+    def _computeH_x_xk(self, z, zk):
+        hij = F.cosine_similarity(z.unsqueeze(0), zk)
+        exp_hij = torch.exp(
+            hij / self.temperature
+        )
+        return exp_hij
+
+    def _computeBatchH_x_xk(self, z, zk):
+        hij = F.cosine_similarity(z.unsqueeze(1), zk, dim=2)
+        exp_hij = torch.exp(
+            hij / self.temperature
+        )
+        return exp_hij
+
+    def _computeX_k(self, X):
+        X_t_s = []
+        for k in range(self.K):
+            X_t_k = self.masks[k](X) * X
+            X_t_s.append(X_t_k)
+        X_t_s = torch.stack(X_t_s, dim=0)
+
+        return X_t_s
+
+    def forward(self, X: torch.Tensor):
+        return self.score(X)
+
+
+def create_network(D: int, out_dims: np.array, bias=True) -> list:
     net_layers = []
     previous_dim = D
     for dim in out_dims:
-        net_layers.append(nn.Linear(previous_dim, dim))
+        net_layers.append(nn.Linear(previous_dim, dim, bias=bias))
         net_layers.append(nn.ReLU())
         previous_dim = dim
     return net_layers
-
-
-def h_func(x_k, x_l):
-    dis = distances.CosineSimilarity()
-    mat = dis(x_k, x_l)
-
-    return torch.exp(
-        mat
-    )

@@ -1,7 +1,9 @@
-from torch.utils.data.dataloader import DataLoader
 import torch
 import numpy as np
-from . import BaseTrainer
+from .BaseTrainer import BaseTrainer
+from torch import nn
+from torch.utils.data.dataloader import DataLoader
+from src.loss import EntropyLoss
 
 
 class DAGMMTrainer(BaseTrainer):
@@ -21,6 +23,9 @@ class DAGMMTrainer(BaseTrainer):
         energy_result, pen_cov_mat = self.estimate_sample_energy(
             z_r, phi, mu, cov_mat
         )
+        self.phi = phi.data
+        self.mu = mu.data
+        self.cov_mat = cov_mat
         return self.loss(sample, x_prime, energy_result, pen_cov_mat)
 
     def loss(self, x, x_prime, energy, pen_cov_mat):
@@ -32,96 +37,24 @@ class DAGMMTrainer(BaseTrainer):
         function that evaluate the model on the test set every iteration of the
         active learning process
         """
-        N, gamma_sum, mu_sum, cov_mat_sum = 0, 0, 0, 0
-
-        # Change the model to evaluation mode
         self.model.eval()
 
         with torch.no_grad():
-            for row in dataset:
-                X, y = row
-                X = X.to(self.device).float()
-
-                # forward pass
-                code, x_prime, cosim, z, gamma = self.model(X)
-                phi, mu, cov_mat = self.compute_params(z, gamma)
-
-                batch_gamma_sum = gamma.sum(axis=0)
-
-                gamma_sum += batch_gamma_sum
-                mu_sum += mu * batch_gamma_sum.unsqueeze(-1)  # keep sums of the numerator only
-                cov_mat_sum += cov_mat * batch_gamma_sum.unsqueeze(-1).unsqueeze(-1)  # keep sums of the numerator only
-                N += X.shape[0]
-
-            train_phi = gamma_sum / N
-            train_mu = mu_sum / gamma_sum.unsqueeze(-1)
-            train_cov = cov_mat_sum / gamma_sum.unsqueeze(-1).unsqueeze(-1)
-
-            print("Train N:", N)
-            print("\u03C6 :\n", train_phi.shape)
-            print("\u03BC :\n", train_mu.shape)
-            print("\u03A3 :\n", train_cov.shape)
-
-            # Calculate energy using estimated parameters
 
             scores = []
-            y_true = []
 
             for row in dataset:
-                X, y = row
-                X = X.to(self.device).float()
+                X = row[0].to(self.device).float()
 
                 # forward pass
                 code, x_prime, cosim, z, gamma = self.model(X)
                 sample_energy, pen_cov_mat = self.estimate_sample_energy(
-                    z, train_phi, train_mu, train_cov, average_energy=False
+                    z, self.phi, self.mu, self.cov_mat, average_energy=False
                 )
 
                 scores.extend(sample_energy.cpu().numpy())
-                y_true.extend(y.numpy())
 
-            return np.array(y_true), np.array(scores)
-            #
-            # for data in test_loader:
-            #     test_inputs, label_inputs = data[0].float().to(self.device), data[1]
-            #
-            #     # forward pass
-            #     code, x_prime, cosim, z, gamma = self.model(test_inputs)
-            #     sample_energy, pen_cov_mat = self.model.estimate_sample_energy(
-            #         z, train_phi, train_mu, train_cov, average_energy=False, device=self.device
-            #     )
-            #     test_energy.append(sample_energy.cpu().numpy())
-            #     test_z.append(z.cpu().numpy())
-            #     test_labels.append(label_inputs.numpy())
-            #
-            # test_energy = np.concatenate(test_energy, axis=0)
-            # test_z = np.concatenate(test_z, axis=0)
-            # test_labels = np.concatenate(test_labels, axis=0)
-            #
-            # combined_energy = np.concatenate([train_energy, test_energy], axis=0)
-            #
-            # thresh = np.percentile(combined_energy, energy_threshold)
-            # print("Threshold :", thresh)
-            #
-            # # Prediction using the threshold value
-            # y_pred = (test_energy > thresh).astype(int)
-            # y_true = test_labels.astype(int)
-            #
-            # accuracy = metrics.accuracy_score(y_true, y_pred)
-            # precision, recall, f_score, _ = metrics.precision_recall_fscore_support(y_true, y_pred, average='binary',
-            #                                                                         pos_label=pos_label)
-            # res = {"Accuracy": accuracy, "Precision": precision, "Recall": recall, "F1-Score": f_score}
-            #
-            # print(f"Accuracy:{accuracy}, "
-            #       f"Precision:{precision}, "
-            #       f"Recall:{recall}, "
-            #       f"F-score:{f_score}, "
-            #       f"\nconfusion-matrix: {confusion_matrix(y_true, y_pred)}")
-            #
-            # # switch back to train mode
-            # self.model.train()
-
-            # return res, test_z, test_labels, combined_energy
+            return np.array([]), np.array(scores)
 
     def weighted_log_sum_exp(self, x, weights, dim):
         """
@@ -186,24 +119,6 @@ class DAGMMTrainer(BaseTrainer):
         cov_mat = gamma.unsqueeze(-1).unsqueeze(-1) * cov_mat
         cov_mat = torch.sum(cov_mat, dim=0) / gamma_sum.unsqueeze(-1).unsqueeze(-1)
 
-        # ==============
-        K, N, D = gamma.shape[1], z.shape[0], z.shape[1]
-        # (K,)
-        gamma_sum = torch.sum(gamma, dim=0)
-        # prob de x_i pour chaque cluster k
-        phi_ = gamma_sum / N
-
-        # K x D
-        # :math: `\mu = (I * gamma_sum)^{-1} * (\gamma^T * z)`
-        mu_ = torch.sum(gamma.unsqueeze(-1) * z.unsqueeze(1), dim=0) / gamma_sum.unsqueeze(-1)
-        # Covariance (K x D x D)
-
-        self.phi = phi.data
-        self.mu = mu.data
-        self.cov_mat = cov_mat
-        # self.covs = covs
-        # self.cov_mat = covs
-
         return phi, mu, cov_mat
 
     def estimate_sample_energy(self, z, phi=None, mu=None, cov_mat=None, average_energy=True, eps=1e-12):
@@ -253,19 +168,47 @@ class DAGMMTrainer(BaseTrainer):
         return energy_result, pen_cov_mat
 
     def score(self, sample: torch.Tensor):
-        pass
+        _, _, _, z, _ = self.model(sample)
+        return self.estimate_sample_energy(z)
 
 
-class NeuTralADTrainer(BaseTrainer):
+class NeuTraADTrainer(BaseTrainer):
 
     def __init__(self, **kwargs):
-        super(NeuTralADTrainer, self).__init__(**kwargs)
-        self.temperature = self.model.temperature
-        self.K = self.model.K
-        self.N = self.model.N
+        super(NeuTraADTrainer, self).__init__(**kwargs)
+        self.metric_hist = []
+        self.optim = None
+        #self.scheduler = None
+        self.criterion = nn.MSELoss()
+
+    def set_optimizer(self):
+        self.optim = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        #self.scheduler = StepLR(self.optim, step_size=20, gamma=0.9)
+        return self.optim
+
+    def train_iter(self, X):
+        scores = self.model(X)
+        loss = scores.mean()
+        return loss
 
     def score(self, sample: torch.Tensor):
-        return self.model.score(sample)
+        return self.model(sample)
+
+
+class MemAETrainer(BaseTrainer):
+
+    def __init__(self, alpha: float, **kwargs) -> None:
+        super(MemAETrainer, self).__init__(**kwargs)
+        self.alpha = alpha
+        self.recon_loss_fn = nn.MSELoss().to(self.device)
+        self.entropy_loss_fn = EntropyLoss().to(self.device)
 
     def train_iter(self, sample: torch.Tensor):
-        return self.model(sample)
+        x_hat, w_hat = self.model(sample)
+        R = self.recon_loss_fn(sample, x_hat)
+        E = self.entropy_loss_fn(w_hat)
+        return R + (self.alpha * E)
+
+    def score(self, sample: torch.Tensor):
+        x_hat, _ = self.model(sample)
+        return torch.sum((sample - x_hat) ** 2, axis=1)

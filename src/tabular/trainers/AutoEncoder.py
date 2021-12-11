@@ -41,20 +41,20 @@ class DAGMMTrainer(BaseTrainer):
 
         with torch.no_grad():
 
-            scores = []
+            scores, y_true = [], []
 
             for row in dataset:
-                X = row[0].to(self.device).float()
-
+                X, y = row
+                X = X.to(self.device).float()
                 # forward pass
                 code, x_prime, cosim, z, gamma = self.model(X)
                 sample_energy, pen_cov_mat = self.estimate_sample_energy(
                     z, self.phi, self.mu, self.cov_mat, average_energy=False
                 )
-
+                y_true.extend(y)
                 scores.extend(sample_energy.cpu().numpy())
 
-            return np.array([]), np.array(scores)
+            return np.array(y_true), np.array(scores)
 
     def weighted_log_sum_exp(self, x, weights, dim):
         """

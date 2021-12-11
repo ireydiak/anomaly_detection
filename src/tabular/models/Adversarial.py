@@ -49,6 +49,9 @@ class ALAD(BaseModel):
 
         return out_truexz, out_fakexz, out_truezz, out_fakezz, out_truexx, out_fakexx
 
+    def print_name(self):
+        return 'ALAD'
+
     def get_params(self):
         return {
             'latent_dim': self.latent_dim,

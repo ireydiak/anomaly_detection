@@ -2,7 +2,6 @@ from . import AbstractDataset
 
 
 class IDS2018Dataset(AbstractDataset):
-
     name = 'IDS2018'
 
     def npz_key(self):
@@ -10,7 +9,6 @@ class IDS2018Dataset(AbstractDataset):
 
 
 class IDS2017Dataset(AbstractDataset):
-
     name = 'IDS2017'
 
     def npz_key(self):
@@ -38,7 +36,6 @@ class NSLKDDDataset(AbstractDataset):
 
 
 class USBIDSDataset(AbstractDataset):
-
     name = 'USBIDS'
 
     def npz_key(self):
@@ -46,8 +43,14 @@ class USBIDSDataset(AbstractDataset):
 
 
 class ArrhythmiaDataset(AbstractDataset):
-
     name = 'Arrhythmia'
 
     def npz_key(self):
         return "arrhythmia"
+
+
+class ThyroidDataset(AbstractDataset):
+    name = 'Thyroid'
+
+    def npz_key(self):
+        return "thyroid"

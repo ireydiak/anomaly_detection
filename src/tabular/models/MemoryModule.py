@@ -4,7 +4,7 @@ from torch import nn
 from torch.nn import functional as F
 
 
-def hard_shrink_relu(input, lamb=0, epsilon=1e-12) -> float:
+def hard_shrink_relu(input, lamb=0., epsilon=1e-12) -> float:
     return (F.relu(input - lamb) * input) / (torch.abs(input - lamb) + epsilon)
 
 

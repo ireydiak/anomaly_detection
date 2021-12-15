@@ -9,9 +9,9 @@ from ...utils import weights_init_xavier
 
 class MemAE(BaseModel):
 
-    def __init__(self, D: int, mem_dim: int = 50, rep_dim: int = 1, device='cuda'):
+    def __init__(self, in_features: int, mem_dim: int = 50, rep_dim: int = 1, device='cuda'):
         super(MemAE, self).__init__()
-        self.in_features = D
+        self.in_features = in_features
         self.mem_dim = mem_dim
         self.device = device
         self.rep_dim = rep_dim

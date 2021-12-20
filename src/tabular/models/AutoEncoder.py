@@ -47,7 +47,7 @@ class MemAE(BaseModel):
     def get_params(self) -> dict:
         return {
             'rep_dim': self.rep_dim,
-            'D': self.in_features
+            'in_features': self.in_features
         }
 
 
@@ -66,7 +66,7 @@ class DAGMM(BaseModel):
         ----------
         in_features: int
             input dimension
-        L: int
+        latent_dim: int
             latent dimension
         K: int
             number of mixtures
